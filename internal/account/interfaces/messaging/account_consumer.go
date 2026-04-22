@@ -13,20 +13,23 @@ import (
 // AccountConsumer processa comandos recebidos via RabbitMQ.
 // Permite que outros serviços solicitem débito/crédito via mensageria.
 type AccountConsumer struct {
-	service  *services.AccountService
-	consumer *messaging.Consumer
-	logger   *slog.Logger
+	service   *services.AccountService
+	consumer  *messaging.Consumer
+	publisher *messaging.Publisher
+	logger    *slog.Logger
 }
 
 func NewAccountConsumer(
 	service *services.AccountService,
 	consumer *messaging.Consumer,
+	publisher *messaging.Publisher,
 	logger *slog.Logger,
 ) *AccountConsumer {
 	return &AccountConsumer{
-		service:  service,
-		consumer: consumer,
-		logger:   logger,
+		service:   service,
+		consumer:  consumer,
+		publisher: publisher,
+		logger:    logger,
 	}
 }
 
@@ -71,7 +74,11 @@ func (c *AccountConsumer) handleCredit(ctx context.Context, body []byte) error {
 		Amount:    msg.Amount,
 		Reference: msg.Reference,
 	})
-	return err
+	if err != nil {
+		c.publishFailed(ctx, "account.credit.failed", msg, err.Error())
+		return err
+	}
+	return nil
 }
 
 func (c *AccountConsumer) handleDebit(ctx context.Context, body []byte) error {
@@ -85,7 +92,26 @@ func (c *AccountConsumer) handleDebit(ctx context.Context, body []byte) error {
 		Amount:    msg.Amount,
 		Reference: msg.Reference,
 	})
-	return err
+	if err != nil {
+		c.publishFailed(ctx, "account.debit.failed", msg, err.Error())
+		return err
+	}
+	return nil
+}
+
+func (c *AccountConsumer) publishFailed(ctx context.Context, routingKey string, msg creditMessage, reason string) {
+	if c.publisher == nil {
+		return
+	}
+	failedEvent := map[string]interface{}{
+		"account_id": msg.AccountID,
+		"amount":     msg.Amount,
+		"reference":  msg.Reference,
+		"reason":     reason,
+	}
+	if err := c.publisher.Publish(ctx, routingKey, failedEvent); err != nil {
+		c.logger.Error("failed to publish failure event", "routing_key", routingKey, "error", err)
+	}
 }
 
 func validateBody(body []byte) (creditMessage, error) {

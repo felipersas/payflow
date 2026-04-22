@@ -84,7 +84,7 @@ func main() {
 
 	accountService := services.NewAccountService(repo, publisher, logger)
 	accountHandler := accHttp.NewAccountHandler(accountService)
-	accountConsumer := accMessaging.NewAccountConsumer(accountService, consumer, logger)
+	accountConsumer := accMessaging.NewAccountConsumer(accountService, consumer, publisher, logger)
 
 	// 5. HTTP Server
 	r := chi.NewRouter()

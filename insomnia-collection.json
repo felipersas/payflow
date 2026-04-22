@@ -1,0 +1,113 @@
+{
+  "info": {
+    "name": "Payflow API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "account_url", "value": "http://localhost:8080" },
+    { "key": "transfer_url", "value": "http://localhost:8081" },
+    { "key": "account_from", "value": "" },
+    { "key": "account_to", "value": "" },
+    { "key": "transfer_id", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Account Service",
+      "item": [
+        {
+          "name": "Create Account (Origin)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{account_url}}/accounts", "host": ["{{account_url}}"], "path": ["accounts"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"user-001\",\n  \"currency\": \"BRL\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Create Account (Destination)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{account_url}}/accounts", "host": ["{{account_url}}"], "path": ["accounts"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"user-002\",\n  \"currency\": \"BRL\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Get Balance",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{account_url}}/accounts/{{account_from}}/balance", "host": ["{{account_url}}"], "path": ["accounts", "{{account_from}}", "balance"] }
+          }
+        },
+        {
+          "name": "Credit Account",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{account_url}}/accounts/{{account_from}}/credit", "host": ["{{account_url}}"], "path": ["accounts", "{{account_from}}", "credit"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 10000,\n  \"reference\": \"deposit-001\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Debit Account",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{account_url}}/accounts/{{account_from}}/debit", "host": ["{{account_url}}"], "path": ["accounts", "{{account_from}}", "debit"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 5000,\n  \"reference\": \"withdraw-001\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{account_url}}/health", "host": ["{{account_url}}"], "path": ["health"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Transfer Service",
+      "item": [
+        {
+          "name": "Create Transfer",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{transfer_url}}/transfers", "host": ["{{transfer_url}}"], "path": ["transfers"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"from_account_id\": \"{{account_from}}\",\n  \"to_account_id\": \"{{account_to}}\",\n  \"amount\": 2500,\n  \"currency\": \"BRL\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Get Transfer",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{transfer_url}}/transfers/{{transfer_id}}", "host": ["{{transfer_url}}"], "path": ["transfers", "{{transfer_id}}"] }
+          }
+        },
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{transfer_url}}/health", "host": ["{{transfer_url}}"], "path": ["health"] }
+          }
+        }
+      ]
+    }
+  ]
+}
