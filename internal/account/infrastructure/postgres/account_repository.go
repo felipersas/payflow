@@ -21,39 +21,6 @@ func NewAccountRepository(pool *pgxpool.Pool) *AccountRepositoryImpl {
 	return &AccountRepositoryImpl{pool: pool}
 }
 
-// InitSchema cria as tabelas se não existirem. Chamado na inicialização.
-func (r *AccountRepositoryImpl) InitSchema(ctx context.Context) error {
-	queries := []string{
-		`CREATE TABLE IF NOT EXISTS accounts (
-			id VARCHAR(36) PRIMARY KEY,
-			user_id VARCHAR(36) NOT NULL UNIQUE,
-			balance BIGINT NOT NULL DEFAULT 0,
-			currency VARCHAR(3) NOT NULL,
-			is_active BOOLEAN NOT NULL DEFAULT true,
-			version INTEGER NOT NULL DEFAULT 1,
-			created_at TIMESTAMPTZ NOT NULL,
-			updated_at TIMESTAMPTZ NOT NULL
-		)`,
-		`CREATE TABLE IF NOT EXISTS transactions (
-			id VARCHAR(36) PRIMARY KEY,
-			account_id VARCHAR(36) NOT NULL REFERENCES accounts(id),
-			reference VARCHAR(255) NOT NULL UNIQUE,
-			amount BIGINT NOT NULL,
-			type VARCHAR(10) NOT NULL,
-			balance_after BIGINT NOT NULL,
-			created_at TIMESTAMPTZ NOT NULL
-		)`,
-		`CREATE INDEX IF NOT EXISTS idx_transactions_reference ON transactions(reference)`,
-		`CREATE INDEX IF NOT EXISTS idx_transactions_account_id ON transactions(account_id)`,
-	}
-	for _, q := range queries {
-		if _, err := r.pool.Exec(ctx, q); err != nil {
-			return fmt.Errorf("executing schema migration: %w", err)
-		}
-	}
-	return nil
-}
-
 func (r *AccountRepositoryImpl) Create(ctx context.Context, account *entities.Account) error {
 	_, err := r.pool.Exec(ctx,
 		`INSERT INTO accounts (id, user_id, balance, currency, is_active, version, created_at, updated_at)

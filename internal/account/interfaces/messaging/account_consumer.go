@@ -15,14 +15,14 @@ import (
 type AccountConsumer struct {
 	service   *services.AccountService
 	consumer  *messaging.Consumer
-	publisher *messaging.Publisher
+	publisher messaging.MessagePublisher
 	logger    *slog.Logger
 }
 
 func NewAccountConsumer(
 	service *services.AccountService,
 	consumer *messaging.Consumer,
-	publisher *messaging.Publisher,
+	publisher messaging.MessagePublisher,
 	logger *slog.Logger,
 ) *AccountConsumer {
 	return &AccountConsumer{
@@ -33,7 +33,7 @@ func NewAccountConsumer(
 	}
 }
 
-// Start registra os handlers de crédito e débito no RabbitMQ.
+// Start registra os handlers de crédito, débito e compensação no RabbitMQ.
 func (c *AccountConsumer) Start(ctx context.Context) error {
 	// Consome comandos de crédito
 	if err := c.consumer.Consume(ctx,
@@ -49,6 +49,15 @@ func (c *AccountConsumer) Start(ctx context.Context) error {
 		"account-service.debit.cmd",
 		"account.debit.cmd",
 		c.handleDebit,
+	); err != nil {
+		return err
+	}
+
+	// Consome comandos de compensação (reverte débito creditando de volta)
+	if err := c.consumer.Consume(ctx,
+		"account-service.compensate.cmd",
+		"account.compensate.cmd",
+		c.handleCompensate,
 	); err != nil {
 		return err
 	}
@@ -96,6 +105,32 @@ func (c *AccountConsumer) handleDebit(ctx context.Context, body []byte) error {
 		c.publishFailed(ctx, "account.debit.failed", msg, err.Error())
 		return err
 	}
+	return nil
+}
+
+// handleCompensate reverte um débito creditando o valor de volta na conta.
+// Usado pelo saga quando o crédito na conta destino falha.
+func (c *AccountConsumer) handleCompensate(ctx context.Context, body []byte) error {
+	msg, err := validateBody(body)
+	if err != nil {
+		return err
+	}
+
+	_, err = c.service.CreditAccount(ctx, commands.CreditAccountCommand{
+		AccountID: msg.AccountID,
+		Amount:    msg.Amount,
+		Reference: msg.Reference,
+	})
+	if err != nil {
+		c.publishFailed(ctx, "account.compensate.failed", msg, err.Error())
+		return err
+	}
+
+	c.logger.Info("compensation applied",
+		"account_id", msg.AccountID,
+		"amount", msg.Amount,
+		"reference", msg.Reference,
+	)
 	return nil
 }
 

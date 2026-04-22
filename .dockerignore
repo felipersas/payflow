@@ -1,0 +1,10 @@
+.git
+.claude
+.omc
+docs
+*.md
+account-service
+insomnia-collection.json
+docker
+docker-compose.yml
+run.sh

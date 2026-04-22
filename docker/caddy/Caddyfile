@@ -1,0 +1,17 @@
+:80 {
+	handle /accounts* {
+		reverse_proxy account-service:8080
+	}
+
+	handle /transfers* {
+		reverse_proxy transfer-service:8081
+	}
+
+	handle /health {
+		respond "gateway healthy" 200
+	}
+
+	handle {
+		respond "not found" 404
+	}
+}

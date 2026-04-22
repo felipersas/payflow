@@ -15,9 +15,14 @@ import (
 	transferMessaging "github.com/felipersas/payflow/internal/transfer/interfaces/messaging"
 	"github.com/felipersas/payflow/internal/transfer/infrastructure/postgres"
 	"github.com/felipersas/payflow/pkg/config"
+	"github.com/felipersas/payflow/pkg/health"
 	"github.com/felipersas/payflow/pkg/messaging"
+	"github.com/felipersas/payflow/pkg/migrate"
 	"github.com/felipersas/payflow/pkg/middleware"
+	"github.com/felipersas/payflow/pkg/telemetry"
 	"github.com/go-chi/chi/v5"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -33,7 +38,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	// 2. PostgreSQL
+	// 2. Telemetry (OTel tracing)
+	shutdownTracer, err := telemetry.InitTracer(context.Background(), cfg.OTLPEndpoint, cfg.ServiceName, logger)
+	if err != nil {
+		logger.Warn("tracer init failed, continuing without tracing", "error", err)
+	}
+
+	// 3. PostgreSQL
 	ctx := context.Background()
 	poolConfig, err := pgxpool.ParseConfig(cfg.DatabaseURL)
 	if err != nil {
@@ -53,7 +64,7 @@ func main() {
 	}
 	logger.Info("database connected")
 
-	// 3. RabbitMQ
+	// 4. RabbitMQ
 	rabbitConn, err := connectRabbitMQ(cfg.RabbitMQURL, logger)
 	if err != nil {
 		logger.Error("connecting to rabbitmq", "error", err)
@@ -68,6 +79,8 @@ func main() {
 	}
 	defer publisher.Close()
 
+	resilientPub := messaging.NewResilientPublisher(publisher, logger)
+
 	consumer, err := messaging.NewConsumer(rabbitConn, logger)
 	if err != nil {
 		logger.Error("creating consumer", "error", err)
@@ -75,36 +88,43 @@ func main() {
 	}
 	defer consumer.Close()
 
-	// 4. Composition Root
+	// 5. Composition Root
 	repo := postgres.NewTransferRepository(pool)
-	if err := repo.InitSchema(ctx); err != nil {
-		logger.Error("initializing schema", "error", err)
+
+	if err := migrate.Run(cfg.DatabaseURL, postgres.Migrations, "migrations"); err != nil {
+		logger.Error("running migrations", "error", err)
 		os.Exit(1)
 	}
+	logger.Info("migrations applied")
 
-	transferService := services.NewTransferService(repo, publisher, logger)
+	transferService := services.NewTransferService(repo, resilientPub, logger)
 	transferHandler := transferHttp.NewTransferHandler(transferService)
 	transferConsumer := transferMessaging.NewTransferConsumer(transferService, consumer, logger)
 
-	// 5. HTTP Server
+	// 6. Health checks
+	healthChecker := health.NewChecker()
+	healthChecker.AddCheck(health.DBCheck(pool))
+	healthChecker.AddCheck(health.RabbitMQCheck(rabbitConn))
+
+	// 7. HTTP Server
 	r := chi.NewRouter()
+	r.Use(otelhttp.NewMiddleware(cfg.ServiceName))
 	r.Use(middleware.CorrelationID)
 	r.Use(middleware.Logging(logger))
 	r.Use(middleware.Recovery(logger))
+	r.Use(middleware.Metrics)
 
 	r.Route("/transfers", transferHandler.Routes)
-	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"ok"}`))
-	})
+	r.Get("/health", healthChecker.Handler())
+	r.Handle("/metrics", promhttp.Handler())
 
-	// 6. Start consumers
+	// 8. Start consumers
 	if err := transferConsumer.Start(ctx); err != nil {
 		logger.Error("starting consumer", "error", err)
 		os.Exit(1)
 	}
 
-	// 7. HTTP Server com graceful shutdown
+	// 9. HTTP Server com graceful shutdown
 	srv := &http.Server{
 		Addr:         ":" + cfg.ServicePort,
 		Handler:      r,
@@ -132,6 +152,12 @@ func main() {
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		logger.Error("server shutdown error", "error", err)
+	}
+
+	if shutdownTracer != nil {
+		if err := shutdownTracer(shutdownCtx); err != nil {
+			logger.Error("tracer shutdown error", "error", err)
+		}
 	}
 
 	logger.Info("server stopped")

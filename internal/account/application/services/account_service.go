@@ -18,13 +18,13 @@ import (
 // Pertence à camada de aplicação: coordena entidades (domínio) e infraestrutura.
 type AccountService struct {
 	repo      repositories.AccountRepository
-	publisher *messaging.Publisher
+	publisher messaging.MessagePublisher
 	logger    *slog.Logger
 }
 
 func NewAccountService(
 	repo repositories.AccountRepository,
-	publisher *messaging.Publisher,
+	publisher messaging.MessagePublisher,
 	logger *slog.Logger,
 ) *AccountService {
 	return &AccountService{

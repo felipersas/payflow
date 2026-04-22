@@ -7,12 +7,13 @@ import (
 )
 
 type Config struct {
-	DatabaseURL  string
-	RabbitMQURL  string
-	RedisURL     string
-	ServicePort  string
-	JWTSecret    string
-	ServiceName  string
+	DatabaseURL    string
+	RabbitMQURL    string
+	RedisURL       string
+	ServicePort    string
+	JWTSecret      string
+	ServiceName    string
+	OTLPEndpoint   string
 }
 
 func Load() (*Config, error) {
@@ -30,6 +31,7 @@ func Load() (*Config, error) {
 	viper.SetDefault("SERVICE_PORT", "8080")
 	viper.SetDefault("JWT_SECRET", "dev-secret-change-in-production")
 	viper.SetDefault("SERVICE_NAME", "account-service")
+	viper.SetDefault("OTEL_EXPORTER_OTLP_ENDPOINT", "localhost:4317")
 
 	viper.AutomaticEnv()
 
@@ -75,6 +77,9 @@ func Load() (*Config, error) {
 	if err := viper.BindEnv("SERVICE_NAME", "SERVICE_NAME"); err != nil {
 		return nil, fmt.Errorf("binding SERVICE_NAME: %w", err)
 	}
+	if err := viper.BindEnv("OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_ENDPOINT"); err != nil {
+		return nil, fmt.Errorf("binding OTEL_EXPORTER_OTLP_ENDPOINT: %w", err)
+	}
 
 	dbURL := fmt.Sprintf(
 		"postgres://%s:%s@%s:%s/%s?sslmode=disable",
@@ -106,5 +111,6 @@ func Load() (*Config, error) {
 		ServicePort:  viper.GetString("SERVICE_PORT"),
 		JWTSecret:    viper.GetString("JWT_SECRET"),
 		ServiceName:  viper.GetString("SERVICE_NAME"),
+		OTLPEndpoint: viper.GetString("OTEL_EXPORTER_OTLP_ENDPOINT"),
 	}, nil
 }

@@ -14,13 +14,13 @@ import (
 
 type TransferService struct {
 	repo      repositories.TransferRepository
-	publisher *messaging.Publisher
+	publisher messaging.MessagePublisher
 	logger    *slog.Logger
 }
 
 func NewTransferService(
 	repo repositories.TransferRepository,
-	publisher *messaging.Publisher,
+	publisher messaging.MessagePublisher,
 	logger *slog.Logger,
 ) *TransferService {
 	return &TransferService{
@@ -123,8 +123,8 @@ func (s *TransferService) HandleCreditConfirmed(ctx context.Context, transferID 
 	if transfer == nil {
 		return fmt.Errorf("transfer %s not found", transferID)
 	}
-	if !transfer.IsPending() {
-		s.logger.Warn("transfer already processed, skipping credit confirmation",
+	if transfer.IsCompleted() {
+		s.logger.Warn("transfer already completed, skipping credit confirmation",
 			"transfer_id", transfer.ID,
 			"status", transfer.Status,
 		)
@@ -213,8 +213,8 @@ func (s *TransferService) HandleDebitFailed(ctx context.Context, transferID stri
 	return nil
 }
 
-// HandleCreditFailed marca a transferência como falha quando o crédito é recusado.
-// TODO: implementar compensação (reverter débito na conta de origem).
+// HandleCreditFailed marca a transferência como falha quando o crédito é recusado
+// e envia comando de compensação para reverter o débito na conta de origem.
 func (s *TransferService) HandleCreditFailed(ctx context.Context, transferID string, reason string) error {
 	transfer, err := s.repo.GetByID(ctx, transferID)
 	if err != nil {
@@ -236,7 +236,20 @@ func (s *TransferService) HandleCreditFailed(ctx context.Context, transferID str
 		return fmt.Errorf("updating transfer %s status to failed: %w", transfer.ID, err)
 	}
 
-	s.logger.Error("transfer failed at credit step",
+	// Saga compensation: reverse the debit on source account
+	compensateCmd := accountCommand{
+		AccountID: transfer.FromAccountID,
+		Amount:    transfer.Amount,
+		Reference: "compensate-" + transfer.ID,
+	}
+	if err := s.publisher.Publish(ctx, "account.compensate.cmd", compensateCmd); err != nil {
+		s.logger.Error("failed to send compensate command",
+			"transfer_id", transfer.ID,
+			"error", err,
+		)
+	}
+
+	s.logger.Error("transfer failed at credit step, compensation sent",
 		"transfer_id", transfer.ID,
 		"reason", reason,
 	)
@@ -255,7 +268,7 @@ func (s *TransferService) sendDebitCommand(ctx context.Context, transfer *entiti
 	debitCmd := accountCommand{
 		AccountID: transfer.FromAccountID,
 		Amount:    transfer.Amount,
-		Reference: transfer.ID,
+		Reference: "debit-" + transfer.ID,
 	}
 	if err := s.publisher.Publish(ctx, "account.debit.cmd", debitCmd); err != nil {
 		return fmt.Errorf("sending debit command: %w", err)
@@ -267,7 +280,7 @@ func (s *TransferService) sendCreditCommand(ctx context.Context, transfer *entit
 	creditCmd := accountCommand{
 		AccountID: transfer.ToAccountID,
 		Amount:    transfer.Amount,
-		Reference: transfer.ID,
+		Reference: "credit-" + transfer.ID,
 	}
 	if err := s.publisher.Publish(ctx, "account.credit.cmd", creditCmd); err != nil {
 		return fmt.Errorf("sending credit command: %w", err)

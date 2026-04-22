@@ -8,6 +8,8 @@ const (
 	AccountCreditedEvent = "account.credited"
 	AccountDebitedEvent  = "account.debited"
 	AccountBlockedEvent  = "account.blocked"
+
+	AccountCompensateCmd = "account.compensate.cmd"
 )
 
 type AccountCreated struct {

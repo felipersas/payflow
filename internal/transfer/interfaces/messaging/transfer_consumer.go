@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/felipersas/payflow/internal/transfer/application/services"
 	"github.com/felipersas/payflow/pkg/messaging"
@@ -90,7 +91,7 @@ func (c *TransferConsumer) handleAccountDebited(ctx context.Context, body []byte
 		return fmt.Errorf("unmarshaling account debited event: %w", err)
 	}
 
-	return c.service.HandleDebitConfirmed(ctx, msg.Reference)
+	return c.service.HandleDebitConfirmed(ctx, stripPrefix(msg.Reference))
 }
 
 func (c *TransferConsumer) handleAccountCredited(ctx context.Context, body []byte) error {
@@ -99,7 +100,7 @@ func (c *TransferConsumer) handleAccountCredited(ctx context.Context, body []byt
 		return fmt.Errorf("unmarshaling account credited event: %w", err)
 	}
 
-	return c.service.HandleCreditConfirmed(ctx, msg.Reference)
+	return c.service.HandleCreditConfirmed(ctx, stripPrefix(msg.Reference))
 }
 
 func (c *TransferConsumer) handleDebitFailed(ctx context.Context, body []byte) error {
@@ -108,7 +109,7 @@ func (c *TransferConsumer) handleDebitFailed(ctx context.Context, body []byte) e
 		return fmt.Errorf("unmarshaling account debit failed event: %w", err)
 	}
 
-	return c.service.HandleDebitFailed(ctx, msg.Reference, msg.Reason)
+	return c.service.HandleDebitFailed(ctx, stripPrefix(msg.Reference), msg.Reason)
 }
 
 func (c *TransferConsumer) handleCreditFailed(ctx context.Context, body []byte) error {
@@ -117,5 +118,12 @@ func (c *TransferConsumer) handleCreditFailed(ctx context.Context, body []byte) 
 		return fmt.Errorf("unmarshaling account credit failed event: %w", err)
 	}
 
-	return c.service.HandleCreditFailed(ctx, msg.Reference, msg.Reason)
+	return c.service.HandleCreditFailed(ctx, stripPrefix(msg.Reference), msg.Reason)
+}
+
+// stripPrefix removes "debit-" or "credit-" prefix from reference to get transfer ID.
+func stripPrefix(ref string) string {
+	ref = strings.TrimPrefix(ref, "debit-")
+	ref = strings.TrimPrefix(ref, "credit-")
+	return ref
 }

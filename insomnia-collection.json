@@ -4,6 +4,7 @@
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
+    { "key": "gateway_url", "value": "http://localhost:80" },
     { "key": "account_url", "value": "http://localhost:8080" },
     { "key": "transfer_url", "value": "http://localhost:8081" },
     { "key": "account_from", "value": "" },
@@ -12,14 +13,21 @@
   ],
   "item": [
     {
-      "name": "Account Service",
+      "name": "Gateway (port 80)",
       "item": [
+        {
+          "name": "Gateway Health",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{gateway_url}}/health", "host": ["{{gateway_url}}"], "path": ["health"] }
+          }
+        },
         {
           "name": "Create Account (Origin)",
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "url": { "raw": "{{account_url}}/accounts", "host": ["{{account_url}}"], "path": ["accounts"] },
+            "url": { "raw": "{{gateway_url}}/accounts", "host": ["{{gateway_url}}"], "path": ["accounts"] },
             "body": {
               "mode": "raw",
               "raw": "{\n  \"user_id\": \"user-001\",\n  \"currency\": \"BRL\"\n}"
@@ -31,7 +39,7 @@
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "url": { "raw": "{{account_url}}/accounts", "host": ["{{account_url}}"], "path": ["accounts"] },
+            "url": { "raw": "{{gateway_url}}/accounts", "host": ["{{gateway_url}}"], "path": ["accounts"] },
             "body": {
               "mode": "raw",
               "raw": "{\n  \"user_id\": \"user-002\",\n  \"currency\": \"BRL\"\n}"
@@ -42,7 +50,7 @@
           "name": "Get Balance",
           "request": {
             "method": "GET",
-            "url": { "raw": "{{account_url}}/accounts/{{account_from}}/balance", "host": ["{{account_url}}"], "path": ["accounts", "{{account_from}}", "balance"] }
+            "url": { "raw": "{{gateway_url}}/accounts/{{account_from}}/balance", "host": ["{{gateway_url}}"], "path": ["accounts", "{{account_from}}", "balance"] }
           }
         },
         {
@@ -50,7 +58,7 @@
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "url": { "raw": "{{account_url}}/accounts/{{account_from}}/credit", "host": ["{{account_url}}"], "path": ["accounts", "{{account_from}}", "credit"] },
+            "url": { "raw": "{{gateway_url}}/accounts/{{account_from}}/credit", "host": ["{{gateway_url}}"], "path": ["accounts", "{{account_from}}", "credit"] },
             "body": {
               "mode": "raw",
               "raw": "{\n  \"amount\": 10000,\n  \"reference\": \"deposit-001\"\n}"
@@ -62,7 +70,7 @@
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "url": { "raw": "{{account_url}}/accounts/{{account_from}}/debit", "host": ["{{account_url}}"], "path": ["accounts", "{{account_from}}", "debit"] },
+            "url": { "raw": "{{gateway_url}}/accounts/{{account_from}}/debit", "host": ["{{gateway_url}}"], "path": ["accounts", "{{account_from}}", "debit"] },
             "body": {
               "mode": "raw",
               "raw": "{\n  \"amount\": 5000,\n  \"reference\": \"withdraw-001\"\n}"
@@ -70,23 +78,11 @@
           }
         },
         {
-          "name": "Health Check",
-          "request": {
-            "method": "GET",
-            "url": { "raw": "{{account_url}}/health", "host": ["{{account_url}}"], "path": ["health"] }
-          }
-        }
-      ]
-    },
-    {
-      "name": "Transfer Service",
-      "item": [
-        {
           "name": "Create Transfer",
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "url": { "raw": "{{transfer_url}}/transfers", "host": ["{{transfer_url}}"], "path": ["transfers"] },
+            "url": { "raw": "{{gateway_url}}/transfers", "host": ["{{gateway_url}}"], "path": ["transfers"] },
             "body": {
               "mode": "raw",
               "raw": "{\n  \"from_account_id\": \"{{account_from}}\",\n  \"to_account_id\": \"{{account_to}}\",\n  \"amount\": 2500,\n  \"currency\": \"BRL\"\n}"
@@ -97,14 +93,45 @@
           "name": "Get Transfer",
           "request": {
             "method": "GET",
-            "url": { "raw": "{{transfer_url}}/transfers/{{transfer_id}}", "host": ["{{transfer_url}}"], "path": ["transfers", "{{transfer_id}}"] }
+            "url": { "raw": "{{gateway_url}}/transfers/{{transfer_id}}", "host": ["{{gateway_url}}"], "path": ["transfers", "{{transfer_id}}"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Direct - Account Service (8080)",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{account_url}}/health", "host": ["{{account_url}}"], "path": ["health"] }
           }
         },
+        {
+          "name": "Metrics",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{account_url}}/metrics", "host": ["{{account_url}}"], "path": ["metrics"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Direct - Transfer Service (8081)",
+      "item": [
         {
           "name": "Health Check",
           "request": {
             "method": "GET",
             "url": { "raw": "{{transfer_url}}/health", "host": ["{{transfer_url}}"], "path": ["health"] }
+          }
+        },
+        {
+          "name": "Metrics",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{transfer_url}}/metrics", "host": ["{{transfer_url}}"], "path": ["metrics"] }
           }
         }
       ]

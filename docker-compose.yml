@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   postgres:
     image: postgres:16-alpine
@@ -12,11 +10,28 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init-dbs.sh:/docker-entrypoint-initdb.d/init-dbs.sh
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U payflow"]
       interval: 5s
       timeout: 5s
       retries: 5
+
+  db-init:
+    image: postgres:16-alpine
+    container_name: payflow-db-init
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGUSER: payflow
+      PGPASSWORD: payflow123
+    entrypoint: >
+      sh -c "until pg_isready -h postgres -U payflow; do sleep 1; done &&
+             sh /scripts/ensure-dbs.sh"
+    volumes:
+      - ./docker/postgres/ensure-dbs.sh:/scripts/ensure-dbs.sh
 
   rabbitmq:
     image: rabbitmq:3-management-alpine
@@ -47,6 +62,86 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: payflow-jaeger
+    environment:
+      COLLECTOR_OTLP_ENABLED: true
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    container_name: payflow-prometheus
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+
+  account-service:
+    build:
+      context: .
+      dockerfile: docker/account-service/Dockerfile
+    container_name: payflow-account-service
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: payflow
+      DB_PASSWORD: payflow123
+      DB_NAME: payflow_accounts
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: payflow
+      RABBITMQ_PASSWORD: payflow123
+      SERVICE_PORT: "8080"
+      SERVICE_NAME: account-service
+      OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4317
+    ports:
+      - "8080:8080"
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+
+  transfer-service:
+    build:
+      context: .
+      dockerfile: docker/transfer-service/Dockerfile
+    container_name: payflow-transfer-service
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: payflow
+      DB_PASSWORD: payflow123
+      DB_NAME: payflow_transfers
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: payflow
+      RABBITMQ_PASSWORD: payflow123
+      SERVICE_PORT: "8081"
+      SERVICE_NAME: transfer-service
+      OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4317
+    ports:
+      - "8081:8081"
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+
+  gateway:
+    image: caddy:2-alpine
+    container_name: payflow-gateway
+    ports:
+      - "80:80"
+    volumes:
+      - ./docker/caddy/Caddyfile:/etc/caddy/Caddyfile
+    depends_on:
+      - account-service
+      - transfer-service
 
 volumes:
   postgres_data:

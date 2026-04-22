@@ -25,6 +25,12 @@ docker-compose up -d
 log "Waiting for Postgres..."
 until docker exec payflow-postgres pg_isready -U payflow &>/dev/null; do sleep 1; done
 
+log "Creating databases if not exists..."
+docker exec payflow-postgres psql -U payflow -tc "SELECT 1 FROM pg_database WHERE datname = 'payflow_accounts'" | grep -q 1 || \
+    docker exec payflow-postgres psql -U payflow -c "CREATE DATABASE payflow_accounts"
+docker exec payflow-postgres psql -U payflow -tc "SELECT 1 FROM pg_database WHERE datname = 'payflow_transfers'" | grep -q 1 || \
+    docker exec payflow-postgres psql -U payflow -c "CREATE DATABASE payflow_transfers"
+
 log "Waiting for RabbitMQ..."
 until docker exec payflow-rabbitmq rabbitmq-diagnostics check_port_connectivity &>/dev/null; do sleep 2; done
 
@@ -32,12 +38,12 @@ log "Infrastructure ready."
 
 # 2. Account Service (bg)
 log "Starting account-service on :8080..."
-SERVICE_PORT=8080 SERVICE_NAME=account-service go run cmd/account-service/main.go &
+DB_NAME=payflow_accounts SERVICE_PORT=8080 SERVICE_NAME=account-service go run cmd/account-service/main.go &
 ACCOUNT_PID=$!
 
 # 3. Transfer Service (bg)
 log "Starting transfer-service on :8081..."
-SERVICE_PORT=8081 SERVICE_NAME=transfer-service go run cmd/transfer-service/main.go &
+DB_NAME=payflow_transfers SERVICE_PORT=8081 SERVICE_NAME=transfer-service go run cmd/transfer-service/main.go &
 TRANSFER_PID=$!
 
 # 4. Wait for health

@@ -1,0 +1,11 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: "account-service"
+    static_configs:
+      - targets: ["account-service:8080"]
+
+  - job_name: "transfer-service"
+    static_configs:
+      - targets: ["transfer-service:8081"]
