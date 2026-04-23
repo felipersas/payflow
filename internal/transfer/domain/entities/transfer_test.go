@@ -75,7 +75,7 @@ func TestNewTransfer(t *testing.T) {
 				return
 			}
 			require.NoError(t, err, "unexpected error")
-			assert.Equal(t, "pending", transfer.Status)
+			assert.Equal(t, TransferPending, transfer.Status)
 			assert.Equal(t, 1, transfer.Version)
 			assert.NotEmpty(t, transfer.ID)
 			assert.Equal(t, tt.fromAccountID, transfer.FromAccountID)
@@ -91,10 +91,10 @@ func TestTransfer_MarkCompleted(t *testing.T) {
 
 	event, err := transfer.MarkCompleted()
 	require.NoError(t, err)
-	assert.Equal(t, "completed", transfer.Status)
+	assert.Equal(t, TransferCompleted, transfer.Status)
 	assert.Equal(t, 2, transfer.Version)
 	assert.Equal(t, transfer.ID, event.TransferID)
-	assert.Equal(t, "completed", event.Status)
+	assert.Equal(t, string(TransferCompleted), event.Status)
 	assert.Equal(t, "acc-1", event.FromAccountID)
 	assert.Equal(t, "acc-2", event.ToAccountID)
 	assert.Equal(t, int64(1000), event.Amount)
@@ -106,9 +106,9 @@ func TestTransfer_MarkFailed(t *testing.T) {
 
 	event, err := transfer.MarkFailed()
 	require.NoError(t, err)
-	assert.Equal(t, "failed", transfer.Status)
+	assert.Equal(t, TransferFailed, transfer.Status)
 	assert.Equal(t, 2, transfer.Version)
-	assert.Equal(t, "failed", event.Status)
+	assert.Equal(t, string(TransferFailed), event.Status)
 }
 
 func TestTransfer_IsPending(t *testing.T) {

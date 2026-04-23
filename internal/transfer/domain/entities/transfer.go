@@ -1,11 +1,20 @@
 package entities
 
 import (
-	"fmt"
 	"time"
 
+	apperrors "github.com/felipersas/payflow/pkg/errors"
 	"github.com/felipersas/payflow/pkg/events"
 	"github.com/google/uuid"
+)
+
+type TransferStatus string
+
+const (
+	TransferPending    TransferStatus = "pending"
+	TransferProcessing TransferStatus = "processing"
+	TransferCompleted  TransferStatus = "completed"
+	TransferFailed     TransferStatus = "failed"
 )
 
 // Transfer é a entidade raiz do agregado Transfer.
@@ -16,7 +25,7 @@ type Transfer struct {
 	ToAccountID   string
 	Amount        int64 // centavos
 	Currency      string
-	Status        string // e.g., "pending", "completed", "failed"
+	Status        TransferStatus
 	Version       int
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
@@ -29,7 +38,7 @@ func NewTransfer(fromAccountID, toAccountID string, amount int64, currency strin
 		ToAccountID:   toAccountID,
 		Amount:        amount,
 		Currency:      currency,
-		Status:        "pending",
+		Status:        TransferPending,
 		Version:       1,
 		CreatedAt:     time.Now().UTC(),
 		UpdatedAt:     time.Now().UTC(),
@@ -42,22 +51,22 @@ func NewTransfer(fromAccountID, toAccountID string, amount int64, currency strin
 
 func (t *Transfer) validate() error {
 	if t.FromAccountID == "" {
-		return fmt.Errorf("from account ID is required")
+		return apperrors.BusinessRule("from account ID is required")
 	}
 	if t.ToAccountID == "" {
-		return fmt.Errorf("to account ID is required")
+		return apperrors.BusinessRule("to account ID is required")
 	}
 	if t.Amount <= 0 {
-		return fmt.Errorf("amount must be positive, got %d", t.Amount)
+		return apperrors.BusinessRule("amount must be positive, got %d", t.Amount)
 	}
 	if t.Currency == "" {
-		return fmt.Errorf("currency is required")
+		return apperrors.BusinessRule("currency is required")
 	}
 	return nil
 }
 
 func (t *Transfer) MarkCompleted() (*events.TransferOcurred, error) {
-	t.Status = "completed"
+	t.Status = TransferCompleted
 	t.Version++
 	t.UpdatedAt = time.Now().UTC()
 
@@ -67,14 +76,14 @@ func (t *Transfer) MarkCompleted() (*events.TransferOcurred, error) {
 		ToAccountID:   t.ToAccountID,
 		Amount:        t.Amount,
 		Currency:      t.Currency,
-		Status:        t.Status,
+		Status:        string(t.Status),
 	}
 
 	return event, nil
 }
 
 func (t *Transfer) MarkFailed() (*events.TransferOcurred, error) {
-	t.Status = "failed"
+	t.Status = TransferFailed
 	t.Version++
 	t.UpdatedAt = time.Now().UTC()
 
@@ -84,16 +93,16 @@ func (t *Transfer) MarkFailed() (*events.TransferOcurred, error) {
 		ToAccountID:   t.ToAccountID,
 		Amount:        t.Amount,
 		Currency:      t.Currency,
-		Status:        t.Status,
+		Status:        string(t.Status),
 	}
 
 	return event, nil
 }
 
 func (t *Transfer) IsPending() bool {
-	return t.Status == "pending"
+	return t.Status == TransferPending
 }
 
 func (t *Transfer) IsCompleted() bool {
-	return t.Status == "completed"
+	return t.Status == TransferCompleted
 }

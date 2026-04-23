@@ -9,6 +9,7 @@ import (
 	"github.com/felipersas/payflow/internal/account/application/queries"
 	"github.com/felipersas/payflow/internal/account/domain/entities"
 	"github.com/felipersas/payflow/internal/account/domain/repositories"
+	apperrors "github.com/felipersas/payflow/pkg/errors"
 	"github.com/felipersas/payflow/pkg/events"
 	"github.com/felipersas/payflow/pkg/messaging"
 	"github.com/google/uuid"
@@ -94,7 +95,7 @@ func (s *AccountService) DebitAccount(ctx context.Context, cmd commands.DebitAcc
 			AccountID:    account.ID,
 			Reference:    cmd.Reference,
 			Amount:       cmd.Amount,
-			Type:         "debit",
+			Type:         repositories.TransactionDebit,
 			BalanceAfter: account.Balance,
 		}
 		if err := s.repo.SaveTransaction(txCtx, tx); err != nil {
@@ -149,7 +150,7 @@ func (s *AccountService) CreditAccount(ctx context.Context, cmd commands.CreditA
 			AccountID:    account.ID,
 			Reference:    cmd.Reference,
 			Amount:       cmd.Amount,
-			Type:         "credit",
+			Type:         repositories.TransactionCredit,
 			BalanceAfter: account.Balance,
 		}
 		if err := s.repo.SaveTransaction(txCtx, tx); err != nil {
@@ -175,7 +176,7 @@ func (s *AccountService) VerifyAccountOwner(ctx context.Context, accountID, user
 		return err
 	}
 	if account.UserID != userID {
-		return fmt.Errorf("account does not belong to authenticated user")
+		return apperrors.Forbidden("account does not belong to authenticated user")
 	}
 	return nil
 }

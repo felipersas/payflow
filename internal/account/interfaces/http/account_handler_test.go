@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
+	apperrors "github.com/felipersas/payflow/pkg/errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -131,7 +131,7 @@ func TestGetBalance_NotFound(t *testing.T) {
 
 	mockRepo := repositories.NewMockAccountRepository(ctrl)
 
-	mockRepo.EXPECT().GetByID(gomock.Any(), "nonexistent").Return(nil, fmt.Errorf("account not found"))
+	mockRepo.EXPECT().GetByID(gomock.Any(), "nonexistent").Return(nil, apperrors.NotFound("account not found"))
 
 	h := setupAccountHandler(ctrl, mockRepo)
 	r := setupAccountRouter(h, "user-1")
@@ -141,8 +141,8 @@ func TestGetBalance_NotFound(t *testing.T) {
 
 	r.ServeHTTP(rec, req)
 
-	// Returns 403 because the handler checks ownership first, which fails for non-existent accounts
-	assert.Equal(t, http.StatusForbidden, rec.Code)
+	// Returns 404 because the account doesn't exist (NotFound from domain error)
+	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
 func TestCreditAccount_Success(t *testing.T) {

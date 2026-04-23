@@ -9,6 +9,7 @@ import (
 	"github.com/felipersas/payflow/internal/user/domain/entities"
 	"github.com/felipersas/payflow/internal/user/domain/repositories"
 	"github.com/felipersas/payflow/pkg/auth"
+	apperrors "github.com/felipersas/payflow/pkg/errors"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -46,7 +47,7 @@ type UserDTO struct {
 func (s *AuthService) Register(ctx context.Context, cmd commands.RegisterCommand) (*AuthResult, error) {
 	existing, _ := s.userRepo.GetByEmail(ctx, cmd.Email)
 	if existing != nil {
-		return nil, fmt.Errorf("email already registered")
+		return nil, apperrors.Conflict("email already registered")
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(cmd.Password), bcrypt.DefaultCost)
@@ -79,11 +80,11 @@ func (s *AuthService) Register(ctx context.Context, cmd commands.RegisterCommand
 func (s *AuthService) Login(ctx context.Context, cmd commands.LoginCommand) (*AuthResult, error) {
 	user, err := s.userRepo.GetByEmail(ctx, cmd.Email)
 	if err != nil {
-		return nil, fmt.Errorf("invalid credentials")
+		return nil, apperrors.Unauthorized("invalid credentials")
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(cmd.Password)); err != nil {
-		return nil, fmt.Errorf("invalid credentials")
+		return nil, apperrors.Unauthorized("invalid credentials")
 	}
 
 	token, err := auth.GenerateToken(s.jwtSecret, user.ID)

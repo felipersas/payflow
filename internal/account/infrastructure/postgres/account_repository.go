@@ -7,6 +7,7 @@ import (
 
 	"github.com/felipersas/payflow/internal/account/domain/entities"
 	"github.com/felipersas/payflow/internal/account/domain/repositories"
+	apperrors "github.com/felipersas/payflow/pkg/errors"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -75,7 +76,7 @@ func (r *AccountRepositoryImpl) GetByID(ctx context.Context, id string) (*entiti
 	).Scan(&a.ID, &a.UserID, &a.Balance, &a.Currency, &a.IsActive, &a.Version, &a.CreatedAt, &a.UpdatedAt)
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			return nil, fmt.Errorf("account %s not found", id)
+			return nil, apperrors.NotFound("account %s not found", id)
 		}
 		return nil, fmt.Errorf("querying account: %w", err)
 	}
@@ -90,7 +91,7 @@ func (r *AccountRepositoryImpl) GetByUserID(ctx context.Context, userID string) 
 	).Scan(&a.ID, &a.UserID, &a.Balance, &a.Currency, &a.IsActive, &a.Version, &a.CreatedAt, &a.UpdatedAt)
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			return nil, fmt.Errorf("account for user %s not found", userID)
+			return nil, apperrors.NotFound("account for user %s not found", userID)
 		}
 		return nil, fmt.Errorf("querying account by user_id: %w", err)
 	}

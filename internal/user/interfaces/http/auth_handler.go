@@ -1,11 +1,12 @@
 package http
 
 import (
-	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/felipersas/payflow/internal/user/application/commands"
 	"github.com/felipersas/payflow/internal/user/application/services"
+	"github.com/felipersas/payflow/pkg/httputil"
 	"github.com/felipersas/payflow/pkg/validation"
 	"github.com/go-chi/chi/v5"
 )
@@ -29,12 +30,8 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		Email    string `json:"email" validate:"required,email"`
 		Password string `json:"password" validate:"required,min=6"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
-		return
-	}
-	if err := validation.Validate(&req); err != nil {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": err.Error(), "fields": err.(*validation.ValidationError).Fields})
+	if err := httputil.DecodeAndValidate(r, &req); err != nil {
+		writeHandlerError(w, err)
 		return
 	}
 
@@ -43,11 +40,11 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		Password: req.Password,
 	})
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		httputil.WriteError(w, err)
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, result)
+	httputil.WriteJSON(w, http.StatusCreated, result)
 }
 
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
@@ -55,12 +52,8 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		Email    string `json:"email" validate:"required,email"`
 		Password string `json:"password" validate:"required"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
-		return
-	}
-	if err := validation.Validate(&req); err != nil {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": err.Error(), "fields": err.(*validation.ValidationError).Fields})
+	if err := httputil.DecodeAndValidate(r, &req); err != nil {
+		writeHandlerError(w, err)
 		return
 	}
 
@@ -69,15 +62,23 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		Password: req.Password,
 	})
 	if err != nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": err.Error()})
+		httputil.WriteError(w, err)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, result)
+	httputil.WriteJSON(w, http.StatusOK, result)
 }
 
-func writeJSON(w http.ResponseWriter, status int, data any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(data)
+// writeHandlerError distinguishes decode errors (400) from validation errors (422).
+func writeHandlerError(w http.ResponseWriter, err error) {
+	if httputil.IsDecodeError(err) {
+		httputil.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	var valErr *validation.ValidationError
+	if errors.As(err, &valErr) {
+		httputil.WriteValidationError(w, err)
+		return
+	}
+	httputil.WriteError(w, err)
 }

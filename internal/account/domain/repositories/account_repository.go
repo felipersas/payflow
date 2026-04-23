@@ -37,14 +37,22 @@ type AccountRepository interface {
 	RunInTransaction(ctx context.Context, fn func(ctx context.Context) error) error
 }
 
+// TransactionType representa o tipo de transação.
+type TransactionType string
+
+const (
+	TransactionCredit TransactionType = "credit"
+	TransactionDebit  TransactionType = "debit"
+)
+
 // Transaction representa o registro de idempotência.
 // Se uma transação com a mesma referência já existe, a operação é ignorada.
 type Transaction struct {
-	ID          string
-	AccountID   string
-	Reference   string
-	Amount      int64
-	Type        string // "credit" ou "debit"
+	ID           string
+	AccountID    string
+	Reference    string
+	Amount       int64
+	Type         TransactionType
 	BalanceAfter int64
-	CreatedAt   string
+	CreatedAt    string
 }

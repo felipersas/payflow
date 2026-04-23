@@ -9,6 +9,7 @@ import (
 	"github.com/felipersas/payflow/internal/transfer/application/queries"
 	"github.com/felipersas/payflow/internal/transfer/domain/entities"
 	"github.com/felipersas/payflow/internal/transfer/domain/repositories"
+	apperrors "github.com/felipersas/payflow/pkg/errors"
 	"github.com/felipersas/payflow/pkg/messaging"
 )
 
@@ -41,7 +42,7 @@ type accountCommand struct {
 // CreateTransfer cria uma transferência pendente e dispara o passo 1 do saga:
 // envia o comando de débito para o account-service.
 func (s *TransferService) CreateTransfer(ctx context.Context, cmd commands.CreateTransferCommand) (*queries.TransferResult, error) {
-	transfer, err := entities.NewTransfer(cmd.FromAccountID, cmd.ToAccountID, int64(cmd.Amount), cmd.Currency)
+	transfer, err := entities.NewTransfer(cmd.FromAccountID, cmd.ToAccountID, cmd.Amount, cmd.Currency)
 	if err != nil {
 		return nil, fmt.Errorf("creating transfer entity: %w", err)
 	}
@@ -72,7 +73,7 @@ func (s *TransferService) CreateTransfer(ctx context.Context, cmd commands.Creat
 	}, nil
 }
 
-// HandleDebitConfirmed avança o saga quando o débito é confirmado:
+// HandleDebitConfirmed o saga quando o débito é confirmado:
 // atualiza status para "processing" e envia comando de crédito para a conta de destino.
 func (s *TransferService) HandleDebitConfirmed(ctx context.Context, transferID string) error {
 	transfer, err := s.repo.GetByID(ctx, transferID)
@@ -80,7 +81,7 @@ func (s *TransferService) HandleDebitConfirmed(ctx context.Context, transferID s
 		return fmt.Errorf("finding transfer %s: %w", transferID, err)
 	}
 	if transfer == nil {
-		return fmt.Errorf("transfer %s not found", transferID)
+		return apperrors.NotFound("transfer %s not found", transferID)
 	}
 	if !transfer.IsPending() {
 		s.logger.Warn("transfer already processed, skipping debit confirmation",
@@ -91,13 +92,13 @@ func (s *TransferService) HandleDebitConfirmed(ctx context.Context, transferID s
 	}
 
 	// Atualiza status intermediário
-	if err := s.repo.UpdateStatus(ctx, transfer.ID, "processing"); err != nil {
+	if err := s.repo.UpdateStatus(ctx, transfer.ID, string(entities.TransferProcessing)); err != nil {
 		return fmt.Errorf("updating transfer %s to processing: %w", transfer.ID, err)
 	}
 
 	if err := s.sendCreditCommand(ctx, transfer); err != nil {
 		// Falha ao enviar crédito: marca como failed
-		if failErr := s.repo.UpdateStatus(ctx, transfer.ID, "failed"); failErr != nil {
+		if failErr := s.repo.UpdateStatus(ctx, transfer.ID, string(entities.TransferFailed)); failErr != nil {
 			s.logger.Error("failed to mark transfer as failed after credit command error",
 				"transfer_id", transfer.ID,
 				"error", failErr,
@@ -121,7 +122,7 @@ func (s *TransferService) HandleCreditConfirmed(ctx context.Context, transferID 
 		return fmt.Errorf("finding transfer %s: %w", transferID, err)
 	}
 	if transfer == nil {
-		return fmt.Errorf("transfer %s not found", transferID)
+		return apperrors.NotFound("transfer %s not found", transferID)
 	}
 	if transfer.IsCompleted() {
 		s.logger.Warn("transfer already completed, skipping credit confirmation",
@@ -136,7 +137,7 @@ func (s *TransferService) HandleCreditConfirmed(ctx context.Context, transferID 
 		return fmt.Errorf("marking transfer %s completed: %w", transfer.ID, err)
 	}
 
-	if err := s.repo.UpdateStatus(ctx, transfer.ID, transfer.Status); err != nil {
+	if err := s.repo.UpdateStatus(ctx, transfer.ID, string(transfer.Status)); err != nil {
 		return fmt.Errorf("updating transfer %s status: %w", transfer.ID, err)
 	}
 
@@ -163,7 +164,7 @@ func (s *TransferService) GetTransfer(ctx context.Context, id string) (*queries.
 		return nil, fmt.Errorf("finding transfer %s: %w", id, err)
 	}
 	if transfer == nil {
-		return nil, fmt.Errorf("transfer %s not found", id)
+		return nil, apperrors.NotFound("transfer %s not found", id)
 	}
 
 	return &queries.TransferResult{
@@ -194,7 +195,7 @@ func (s *TransferService) HandleDebitFailed(ctx context.Context, transferID stri
 		return fmt.Errorf("marking transfer %s failed: %w", transfer.ID, err)
 	}
 
-	if err := s.repo.UpdateStatus(ctx, transfer.ID, transfer.Status); err != nil {
+	if err := s.repo.UpdateStatus(ctx, transfer.ID, string(transfer.Status)); err != nil {
 		return fmt.Errorf("updating transfer %s status to failed: %w", transfer.ID, err)
 	}
 
@@ -232,7 +233,7 @@ func (s *TransferService) HandleCreditFailed(ctx context.Context, transferID str
 		return fmt.Errorf("marking transfer %s failed: %w", transfer.ID, err)
 	}
 
-	if err := s.repo.UpdateStatus(ctx, transfer.ID, transfer.Status); err != nil {
+	if err := s.repo.UpdateStatus(ctx, transfer.ID, string(transfer.Status)); err != nil {
 		return fmt.Errorf("updating transfer %s status to failed: %w", transfer.ID, err)
 	}
 

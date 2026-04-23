@@ -111,7 +111,7 @@ func TestRegister_DuplicateEmail(t *testing.T) {
 
 	r.ServeHTTP(rec, req)
 
-	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Equal(t, http.StatusConflict, rec.Code)
 
 	var resp map[string]string
 	err = json.Unmarshal(rec.Body.Bytes(), &resp)

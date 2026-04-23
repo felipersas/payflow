@@ -46,7 +46,7 @@ func TestCreateTransfer_Success(t *testing.T) {
 	body := map[string]any{
 		"from_account_id": fromAccountID,
 		"to_account_id":   toAccountID,
-		"amount":          100.50,
+		"amount":          10050,
 		"currency":        "BRL",
 	}
 	jsonBody, _ := json.Marshal(body)
@@ -102,7 +102,7 @@ func TestCreateTransfer_InvalidInput(t *testing.T) {
 	body := map[string]any{
 		"from_account_id": "",
 		"to_account_id":   uuid.New().String(),
-		"amount":          100.50,
+		"amount":          10050,
 		"currency":        "BRL",
 	}
 	jsonBody, _ := json.Marshal(body)
@@ -169,5 +169,5 @@ func TestGetTransfer_NotFound(t *testing.T) {
 
 	r.ServeHTTP(rec, req)
 
-	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assert.Equal(t, http.StatusNotFound, rec.Code, "Body: %s", rec.Body.String())
 }

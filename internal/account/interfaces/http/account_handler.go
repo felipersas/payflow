@@ -1,13 +1,13 @@
 package http
 
 import (
-	"encoding/json"
-	"fmt"
+	"errors"
 	"net/http"
 
 	"github.com/felipersas/payflow/internal/account/application/commands"
 	"github.com/felipersas/payflow/internal/account/application/queries"
 	"github.com/felipersas/payflow/internal/account/application/services"
+	"github.com/felipersas/payflow/pkg/httputil"
 	"github.com/felipersas/payflow/pkg/middleware"
 	"github.com/felipersas/payflow/pkg/validation"
 	"github.com/go-chi/chi/v5"
@@ -47,7 +47,7 @@ type accountResponse struct {
 func (h *AccountHandler) verifyOwnership(w http.ResponseWriter, r *http.Request, accountID string) bool {
 	userID := middleware.GetUserID(r.Context())
 	if err := h.service.VerifyAccountOwner(r.Context(), accountID, userID); err != nil {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
+		httputil.WriteError(w, err)
 		return false
 	}
 	return true
@@ -57,12 +57,8 @@ func (h *AccountHandler) CreateAccount(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r.Context())
 
 	var req createAccountRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
-		return
-	}
-	if err := validation.Validate(&req); err != nil {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": err.Error(), "fields": err.(*validation.ValidationError).Fields})
+	if err := httputil.DecodeAndValidate(r, &req); err != nil {
+		writeHandlerError(w, err)
 		return
 	}
 
@@ -71,11 +67,11 @@ func (h *AccountHandler) CreateAccount(w http.ResponseWriter, r *http.Request) {
 		Currency: req.Currency,
 	})
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		httputil.WriteError(w, err)
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, accountResponse{
+	httputil.WriteJSON(w, http.StatusCreated, accountResponse{
 		ID:       account.ID,
 		UserID:   account.UserID,
 		Balance:  account.Balance,
@@ -87,7 +83,7 @@ func (h *AccountHandler) CreateAccount(w http.ResponseWriter, r *http.Request) {
 func (h *AccountHandler) GetBalance(w http.ResponseWriter, r *http.Request) {
 	accountID := chi.URLParam(r, "id")
 	if accountID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "account id is required"})
+		httputil.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "account id is required"})
 		return
 	}
 
@@ -99,11 +95,11 @@ func (h *AccountHandler) GetBalance(w http.ResponseWriter, r *http.Request) {
 		AccountID: accountID,
 	})
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		httputil.WriteError(w, err)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, result)
+	httputil.WriteJSON(w, http.StatusOK, result)
 }
 
 type creditDebitRequest struct {
@@ -114,7 +110,7 @@ type creditDebitRequest struct {
 func (h *AccountHandler) CreditAccount(w http.ResponseWriter, r *http.Request) {
 	accountID := chi.URLParam(r, "id")
 	if accountID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "account id is required"})
+		httputil.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "account id is required"})
 		return
 	}
 
@@ -123,12 +119,8 @@ func (h *AccountHandler) CreditAccount(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req creditDebitRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
-		return
-	}
-	if err := validation.Validate(&req); err != nil {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": err.Error(), "fields": err.(*validation.ValidationError).Fields})
+	if err := httputil.DecodeAndValidate(r, &req); err != nil {
+		writeHandlerError(w, err)
 		return
 	}
 
@@ -138,15 +130,11 @@ func (h *AccountHandler) CreditAccount(w http.ResponseWriter, r *http.Request) {
 		Reference: req.Reference,
 	})
 	if err != nil {
-		status := http.StatusBadRequest
-		if fmt.Sprint(err) != "" {
-			status = http.StatusUnprocessableEntity
-		}
-		writeJSON(w, status, map[string]string{"error": err.Error()})
+		httputil.WriteError(w, err)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, accountResponse{
+	httputil.WriteJSON(w, http.StatusOK, accountResponse{
 		ID:       account.ID,
 		UserID:   account.UserID,
 		Balance:  account.Balance,
@@ -158,7 +146,7 @@ func (h *AccountHandler) CreditAccount(w http.ResponseWriter, r *http.Request) {
 func (h *AccountHandler) DebitAccount(w http.ResponseWriter, r *http.Request) {
 	accountID := chi.URLParam(r, "id")
 	if accountID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "account id is required"})
+		httputil.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "account id is required"})
 		return
 	}
 
@@ -167,12 +155,8 @@ func (h *AccountHandler) DebitAccount(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req creditDebitRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
-		return
-	}
-	if err := validation.Validate(&req); err != nil {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": err.Error(), "fields": err.(*validation.ValidationError).Fields})
+	if err := httputil.DecodeAndValidate(r, &req); err != nil {
+		writeHandlerError(w, err)
 		return
 	}
 
@@ -182,15 +166,11 @@ func (h *AccountHandler) DebitAccount(w http.ResponseWriter, r *http.Request) {
 		Reference: req.Reference,
 	})
 	if err != nil {
-		status := http.StatusBadRequest
-		if fmt.Sprint(err) != "" {
-			status = http.StatusUnprocessableEntity
-		}
-		writeJSON(w, status, map[string]string{"error": err.Error()})
+		httputil.WriteError(w, err)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, accountResponse{
+	httputil.WriteJSON(w, http.StatusOK, accountResponse{
 		ID:       account.ID,
 		UserID:   account.UserID,
 		Balance:  account.Balance,
@@ -199,8 +179,16 @@ func (h *AccountHandler) DebitAccount(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func writeJSON(w http.ResponseWriter, status int, data any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(data)
+// writeHandlerError distinguishes decode errors (400) from validation errors (422).
+func writeHandlerError(w http.ResponseWriter, err error) {
+	if httputil.IsDecodeError(err) {
+		httputil.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	var valErr *validation.ValidationError
+	if errors.As(err, &valErr) {
+		httputil.WriteValidationError(w, err)
+		return
+	}
+	httputil.WriteError(w, err)
 }

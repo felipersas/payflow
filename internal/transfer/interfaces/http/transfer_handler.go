@@ -1,11 +1,12 @@
 package http
 
 import (
-	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/felipersas/payflow/internal/transfer/application/commands"
 	"github.com/felipersas/payflow/internal/transfer/application/services"
+	"github.com/felipersas/payflow/pkg/httputil"
 	"github.com/felipersas/payflow/pkg/validation"
 	"github.com/go-chi/chi/v5"
 )
@@ -24,20 +25,16 @@ func (h *TransferHandler) Routes(r chi.Router) {
 }
 
 type createTransferRequest struct {
-	FromAccountID string  `json:"from_account_id" validate:"required"`
-	ToAccountID   string  `json:"to_account_id" validate:"required"`
-	Amount        float64 `json:"amount" validate:"required,gt=0"`
-	Currency      string  `json:"currency" validate:"required,len=3"`
+	FromAccountID string `json:"from_account_id" validate:"required"`
+	ToAccountID   string `json:"to_account_id" validate:"required"`
+	Amount        int64  `json:"amount" validate:"required,gt=0"`
+	Currency      string `json:"currency" validate:"required,len=3"`
 }
 
 func (h *TransferHandler) CreateTransfer(w http.ResponseWriter, r *http.Request) {
 	var req createTransferRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
-		return
-	}
-	if err := validation.Validate(&req); err != nil {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": err.Error(), "fields": err.(*validation.ValidationError).Fields})
+	if err := httputil.DecodeAndValidate(r, &req); err != nil {
+		writeHandlerError(w, err)
 		return
 	}
 
@@ -48,31 +45,39 @@ func (h *TransferHandler) CreateTransfer(w http.ResponseWriter, r *http.Request)
 		Currency:      req.Currency,
 	})
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		httputil.WriteError(w, err)
 		return
 	}
 
-	writeJSON(w, http.StatusAccepted, result)
+	httputil.WriteJSON(w, http.StatusAccepted, result)
 }
 
 func (h *TransferHandler) GetTransfer(w http.ResponseWriter, r *http.Request) {
 	transferID := chi.URLParam(r, "id")
 	if transferID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "transfer id is required"})
+		httputil.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "transfer id is required"})
 		return
 	}
 
 	result, err := h.service.GetTransfer(r.Context(), transferID)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		httputil.WriteError(w, err)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, result)
+	httputil.WriteJSON(w, http.StatusOK, result)
 }
 
-func writeJSON(w http.ResponseWriter, status int, data any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(data)
+// writeHandlerError distinguishes decode errors (400) from validation errors (422).
+func writeHandlerError(w http.ResponseWriter, err error) {
+	if httputil.IsDecodeError(err) {
+		httputil.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	var valErr *validation.ValidationError
+	if errors.As(err, &valErr) {
+		httputil.WriteValidationError(w, err)
+		return
+	}
+	httputil.WriteError(w, err)
 }

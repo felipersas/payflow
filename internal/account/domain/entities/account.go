@@ -1,9 +1,9 @@
 package entities
 
 import (
-	"fmt"
 	"time"
 
+	apperrors "github.com/felipersas/payflow/pkg/errors"
 	"github.com/felipersas/payflow/pkg/events"
 	"github.com/google/uuid"
 )
@@ -48,16 +48,16 @@ func NewAccount(userID, currency string) (*Account, error) {
 // - Reference é usada para idempotência
 func (a *Account) Debit(amount int64, reference string) (*events.AccountDebited, error) {
 	if !a.IsActive {
-		return nil, fmt.Errorf("account %s is blocked", a.ID)
+		return nil, apperrors.BusinessRule("account %s is blocked", a.ID)
 	}
 	if amount <= 0 {
-		return nil, fmt.Errorf("debit amount must be positive, got %d", amount)
+		return nil, apperrors.BusinessRule("debit amount must be positive, got %d", amount)
 	}
 	if a.Balance < amount {
-		return nil, fmt.Errorf("insufficient balance: have %d, need %d", a.Balance, amount)
+		return nil, apperrors.BusinessRule("insufficient balance: have %d, need %d", a.Balance, amount)
 	}
 	if reference == "" {
-		return nil, fmt.Errorf("reference is required for debit operations")
+		return nil, apperrors.BusinessRule("reference is required for debit operations")
 	}
 
 	a.Balance -= amount
@@ -80,13 +80,13 @@ func (a *Account) Debit(amount int64, reference string) (*events.AccountDebited,
 // - Reference é usada para idempotência
 func (a *Account) Credit(amount int64, reference string) (*events.AccountCredited, error) {
 	if !a.IsActive {
-		return nil, fmt.Errorf("account %s is blocked", a.ID)
+		return nil, apperrors.BusinessRule("account %s is blocked", a.ID)
 	}
 	if amount <= 0 {
-		return nil, fmt.Errorf("credit amount must be positive, got %d", amount)
+		return nil, apperrors.BusinessRule("credit amount must be positive, got %d", amount)
 	}
 	if reference == "" {
-		return nil, fmt.Errorf("reference is required for credit operations")
+		return nil, apperrors.BusinessRule("reference is required for credit operations")
 	}
 
 	a.Balance += amount
@@ -123,13 +123,13 @@ func (a *Account) Unblock() {
 
 func (a *Account) validate() error {
 	if a.UserID == "" {
-		return fmt.Errorf("user_id is required")
+		return apperrors.BusinessRule("user_id is required")
 	}
 	if a.Currency == "" {
-		return fmt.Errorf("currency is required")
+		return apperrors.BusinessRule("currency is required")
 	}
 	if len(a.Currency) != 3 {
-		return fmt.Errorf("currency must be 3 characters (ISO 4217), got %q", a.Currency)
+		return apperrors.BusinessRule("currency must be 3 characters (ISO 4217), got %q", a.Currency)
 	}
 	return nil
 }

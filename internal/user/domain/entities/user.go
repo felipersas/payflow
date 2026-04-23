@@ -1,9 +1,9 @@
 package entities
 
 import (
-	"fmt"
 	"time"
 
+	apperrors "github.com/felipersas/payflow/pkg/errors"
 	"github.com/google/uuid"
 )
 
@@ -19,10 +19,10 @@ type User struct {
 // NewUser cria um novo usuário com UUID v7 e validação.
 func NewUser(email, passwordHash string) (*User, error) {
 	if email == "" {
-		return nil, fmt.Errorf("email is required")
+		return nil, apperrors.BusinessRule("email is required")
 	}
 	if passwordHash == "" {
-		return nil, fmt.Errorf("password is required")
+		return nil, apperrors.BusinessRule("password is required")
 	}
 
 	now := time.Now().UTC()
