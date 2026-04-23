@@ -1,6 +1,6 @@
 CREATE TABLE IF NOT EXISTS accounts (
     id VARCHAR(36) PRIMARY KEY,
-    user_id VARCHAR(36) NOT NULL UNIQUE,
+    user_id VARCHAR(36) NOT NULL,
     balance BIGINT NOT NULL DEFAULT 0,
     currency VARCHAR(3) NOT NULL,
     is_active BOOLEAN NOT NULL DEFAULT true,

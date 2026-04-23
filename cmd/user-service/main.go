@@ -6,6 +6,7 @@ import (
 	"github.com/felipersas/payflow/internal/user/infrastructure/postgres"
 	"github.com/felipersas/payflow/pkg/app"
 	"github.com/felipersas/payflow/pkg/config"
+	"github.com/felipersas/payflow/pkg/openapi"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -18,6 +19,7 @@ func main() {
 	app.New("user-service", cfg).
 		WithTracer().
 		WithDatabase(postgres.Migrations, "migrations").
+		WithDocs(openapi.MustLoadSpec(userHttp.OpenAPISpec)).
 		RegisterRoutes(func(r chi.Router, d *app.Deps) {
 			userRepo := postgres.NewUserRepository(d.Pool)
 			authService := services.NewAuthService(userRepo, d.JWTSecret, d.Logger)

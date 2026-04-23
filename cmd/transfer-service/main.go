@@ -8,6 +8,7 @@ import (
 	"github.com/felipersas/payflow/pkg/app"
 	"github.com/felipersas/payflow/pkg/config"
 	"github.com/felipersas/payflow/pkg/middleware"
+	"github.com/felipersas/payflow/pkg/openapi"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -23,6 +24,7 @@ func main() {
 		WithTracer().
 		WithDatabase(postgres.Migrations, "migrations").
 		WithRabbitMQ().
+		WithDocs(openapi.MustLoadSpec(transferHttp.OpenAPISpec)).
 		RegisterRoutes(func(r chi.Router, d *app.Deps) {
 			repo := postgres.NewTransferRepository(d.Pool)
 			transferSvc = services.NewTransferService(repo, d.Publisher, d.Logger)

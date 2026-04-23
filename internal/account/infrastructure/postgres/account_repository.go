@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -63,6 +64,10 @@ func (r *AccountRepositoryImpl) Create(ctx context.Context, account *entities.Ac
 		account.IsActive, account.Version, account.CreatedAt, account.UpdatedAt,
 	)
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return apperrors.Conflict("account already exists for user %s", account.UserID)
+		}
 		return fmt.Errorf("inserting account: %w", err)
 	}
 	return nil

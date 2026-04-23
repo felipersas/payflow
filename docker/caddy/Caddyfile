@@ -1,4 +1,12 @@
 :80 {
+	handle /docs* {
+		reverse_proxy user-service:8082
+	}
+
+	handle /openapi.json* {
+		reverse_proxy user-service:8082
+	}
+
 	handle /auth* {
 		reverse_proxy user-service:8082
 	}

@@ -1,0 +1,263 @@
+openapi: 3.1.0
+info:
+  title: PayFlow Account Service
+  description: Account management and balance operations for PayFlow.
+  version: 1.0.0
+  contact:
+    name: PayFlow
+
+servers:
+  - url: /
+    description: Current server
+
+security:
+  - BearerAuth: []
+
+paths:
+  /accounts:
+    post:
+      operationId: createAccount
+      summary: Create a new account
+      tags: [Accounts]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAccountRequest'
+      responses:
+        "201":
+          description: Account created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountResponse'
+        "422":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /accounts/{id}/balance:
+    get:
+      operationId: getBalance
+      summary: Get account balance
+      tags: [Accounts]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Account unique identifier
+      responses:
+        "200":
+          description: Balance retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BalanceResult'
+        "404":
+          description: Account not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /accounts/{id}/credit:
+    post:
+      operationId: creditAccount
+      summary: Credit (add funds to) an account
+      tags: [Accounts]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Account unique identifier
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreditDebitRequest'
+      responses:
+        "200":
+          description: Account credited successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountResponse'
+        "404":
+          description: Account not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "422":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /accounts/{id}/debit:
+    post:
+      operationId: debitAccount
+      summary: Debit (withdraw funds from) an account
+      tags: [Accounts]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Account unique identifier
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreditDebitRequest'
+      responses:
+        "200":
+          description: Account debited successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountResponse'
+        "404":
+          description: Account not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "422":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT token obtained from POST /auth/login
+
+  schemas:
+    CreateAccountRequest:
+      type: object
+      required: [currency]
+      properties:
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+          description: ISO 4217 currency code (3 letters)
+      example:
+        currency: "BRL"
+
+    CreditDebitRequest:
+      type: object
+      required: [amount, reference]
+      properties:
+        amount:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Amount in cents (e.g. 10000 = R$100,00)
+        reference:
+          type: string
+          description: Unique reference for the operation
+      example:
+        amount: 10000
+        reference: "deposit-001"
+
+    AccountResponse:
+      type: object
+      required: [id, user_id, balance, currency, is_active]
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        balance:
+          type: integer
+          format: int64
+          description: Balance in cents
+        currency:
+          type: string
+        is_active:
+          type: boolean
+      example:
+        id: "01923456-7890-7abc-def0-1234567890ab"
+        user_id: "01923456-7890-7abc-def0-1234567890cd"
+        balance: 10000
+        currency: "BRL"
+        is_active: true
+
+    BalanceResult:
+      type: object
+      required: [account_id, balance, currency, is_active]
+      properties:
+        account_id:
+          type: string
+          format: uuid
+        balance:
+          type: integer
+          format: int64
+          description: Balance in cents
+        currency:
+          type: string
+        is_active:
+          type: boolean
+      example:
+        account_id: "01923456-7890-7abc-def0-1234567890ab"
+        balance: 10000
+        currency: "BRL"
+        is_active: true
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+
+    ValidationError:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+        fields:
+          type: object
+          additionalProperties: true

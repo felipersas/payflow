@@ -16,6 +16,7 @@ import (
 	"github.com/felipersas/payflow/pkg/messaging"
 	"github.com/felipersas/payflow/pkg/migrate"
 	"github.com/felipersas/payflow/pkg/middleware"
+	"github.com/felipersas/payflow/pkg/openapi"
 	"github.com/felipersas/payflow/pkg/telemetry"
 	"github.com/go-chi/chi/v5"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -53,6 +54,8 @@ type App struct {
 	migrations    embed.FS
 	migrationsDir string
 	useRabbit     bool
+	useDocs       bool
+	docsSpec      []byte
 	onRoutes      RouteRegistrar
 	onConsumers   ConsumerRegistrar
 }
@@ -79,6 +82,13 @@ func (a *App) WithDatabase(migrations embed.FS, dir string) *App {
 // WithRabbitMQ habilita RabbitMQ (publisher + consumer).
 func (a *App) WithRabbitMQ() *App {
 	a.useRabbit = true
+	return a
+}
+
+// WithDocs habilita endpoints de documentacao (/docs, /openapi.json).
+func (a *App) WithDocs(specJSON []byte) *App {
+	a.useDocs = true
+	a.docsSpec = specJSON
 	return a
 }
 
@@ -318,6 +328,10 @@ func (a *App) initRouter(deps *Deps, healthChecker *health.Checker) *chi.Mux {
 
 	if a.onRoutes != nil {
 		a.onRoutes(r, deps)
+	}
+
+	if a.useDocs {
+		openapi.RegisterDocsRoute(r, a.docsSpec, a.name)
 	}
 
 	r.Get("/health", healthChecker.Handler())

@@ -1,0 +1,221 @@
+openapi: 3.1.0
+info:
+  title: PayFlow Transfer Service
+  description: Transfer orchestration with saga pattern for PayFlow.
+  version: 1.0.0
+  contact:
+    name: PayFlow
+
+servers:
+  - url: /
+    description: Current server
+
+security:
+  - BearerAuth: []
+
+paths:
+  /transfers:
+    post:
+      operationId: createTransfer
+      summary: Create a new transfer between accounts
+      description: |
+        Creates a pending transfer and starts the saga orchestration.
+        The transfer is processed asynchronously via RabbitMQ.
+        Returns 202 Accepted with the pending transfer details.
+      tags: [Transfers]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTransferRequest'
+      responses:
+        "202":
+          description: Transfer created and accepted for processing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransferResult'
+        "422":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    get:
+      operationId: listTransfers
+      summary: List transfers for an account
+      description: |
+        Returns a paginated list of transfers for the given account.
+        Uses cursor-based pagination for efficient scrolling.
+      tags: [Transfers]
+      parameters:
+        - name: account_id
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Filter transfers by account ID (required)
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Pagination cursor from previous response
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+          description: Maximum number of results to return
+      responses:
+        "200":
+          description: Transfers retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransferListResult'
+        "400":
+          description: Invalid cursor or missing account_id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /transfers/{id}:
+    get:
+      operationId: getTransfer
+      summary: Get transfer details by ID
+      tags: [Transfers]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Transfer unique identifier
+      responses:
+        "200":
+          description: Transfer details retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransferResult'
+        "404":
+          description: Transfer not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT token obtained from POST /auth/login
+
+  schemas:
+    CreateTransferRequest:
+      type: object
+      required: [from_account_id, to_account_id, amount, currency]
+      properties:
+        from_account_id:
+          type: string
+          format: uuid
+          description: Source account ID (will be debited)
+        to_account_id:
+          type: string
+          format: uuid
+          description: Destination account ID (will be credited)
+        amount:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Transfer amount in cents (e.g. 5000 = R$50,00)
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+          description: ISO 4217 currency code (3 letters)
+      example:
+        from_account_id: "01923456-7890-7abc-def0-1234567890ab"
+        to_account_id: "01923456-7890-7abc-def0-1234567890cd"
+        amount: 5000
+        currency: "BRL"
+
+    TransferResult:
+      type: object
+      required: [transfer_id, from_account_id, to_account_id, amount, currency, status]
+      properties:
+        transfer_id:
+          type: string
+          format: uuid
+        from_account_id:
+          type: string
+          format: uuid
+        to_account_id:
+          type: string
+          format: uuid
+        amount:
+          type: integer
+          format: int64
+          description: Transfer amount in cents
+        currency:
+          type: string
+        status:
+          type: string
+          enum: [pending, processing, completed, failed]
+          description: Current transfer status in the saga lifecycle
+      example:
+        transfer_id: "01923456-7890-7abc-def0-1234567890ef"
+        from_account_id: "01923456-7890-7abc-def0-1234567890ab"
+        to_account_id: "01923456-7890-7abc-def0-1234567890cd"
+        amount: 5000
+        currency: "BRL"
+        status: "pending"
+
+    TransferListResult:
+      type: object
+      required: [data, has_more]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/TransferResult'
+        next_cursor:
+          type: string
+          description: Cursor to fetch the next page (omitted when has_more is false)
+        has_more:
+          type: boolean
+          description: Whether more results are available
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+
+    ValidationError:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+        fields:
+          type: object
+          additionalProperties: true
