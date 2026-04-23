@@ -2,12 +2,16 @@ package postgres
 
 import (
 	"context"
+	"embed"
 	"fmt"
 
-	"github.com/felipersas/payflow/internal/account/domain/entities"
+	"github.com/felipersas/payflow/internal/user/domain/entities"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+//go:embed migrations/*.sql
+var Migrations embed.FS
 
 // UserRepositoryImpl implementa repositories.UserRepository com pgx.
 type UserRepositoryImpl struct {

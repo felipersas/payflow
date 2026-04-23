@@ -3,7 +3,7 @@ package repositories
 import (
 	"context"
 
-	"github.com/felipersas/payflow/internal/account/domain/entities"
+	"github.com/felipersas/payflow/internal/user/domain/entities"
 )
 
 // UserRepository é o contrato para persistência de usuários.

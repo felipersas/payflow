@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/felipersas/payflow/internal/account/application/commands"
-	"github.com/felipersas/payflow/internal/account/domain/entities"
-	"github.com/felipersas/payflow/internal/account/domain/repositories"
+	"github.com/felipersas/payflow/internal/user/application/commands"
+	"github.com/felipersas/payflow/internal/user/domain/entities"
+	"github.com/felipersas/payflow/internal/user/domain/repositories"
 	"github.com/felipersas/payflow/pkg/auth"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -33,8 +33,8 @@ func NewAuthService(
 
 // AuthResult é o retorno de register e login.
 type AuthResult struct {
-	Token string     `json:"token"`
-	User  *UserDTO   `json:"user"`
+	Token string   `json:"token"`
+	User  *UserDTO `json:"user"`
 }
 
 // UserDTO é a representação pública do usuário (sem password_hash).

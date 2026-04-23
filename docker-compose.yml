@@ -80,6 +80,27 @@ services:
     ports:
       - "9090:9090"
 
+  user-service:
+    build:
+      context: .
+      dockerfile: docker/user-service/Dockerfile
+    container_name: payflow-user-service
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: payflow
+      DB_PASSWORD: payflow123
+      DB_NAME: payflow_users
+      SERVICE_PORT: "8082"
+      SERVICE_NAME: user-service
+      OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4317
+      JWT_SECRET: payflow-jwt-secret-2026
+    ports:
+      - "8082:8082"
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+
   account-service:
     build:
       context: .

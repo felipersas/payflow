@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/felipersas/payflow/internal/account/application/commands"
-	"github.com/felipersas/payflow/internal/account/application/services"
+	"github.com/felipersas/payflow/internal/user/application/commands"
+	"github.com/felipersas/payflow/internal/user/application/services"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -65,4 +65,10 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, result)
+}
+
+func writeJSON(w http.ResponseWriter, status int, data any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(data)
 }

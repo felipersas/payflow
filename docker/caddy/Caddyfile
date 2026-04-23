@@ -1,6 +1,6 @@
 :80 {
 	handle /auth* {
-		reverse_proxy account-service:8080
+		reverse_proxy user-service:8082
 	}
 
 	handle /accounts* {

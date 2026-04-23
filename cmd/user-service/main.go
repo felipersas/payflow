@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -10,20 +9,17 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/felipersas/payflow/internal/account/application/services"
-	accHttp "github.com/felipersas/payflow/internal/account/interfaces/http"
-	accMessaging "github.com/felipersas/payflow/internal/account/interfaces/messaging"
-	"github.com/felipersas/payflow/internal/account/infrastructure/postgres"
+	"github.com/felipersas/payflow/internal/user/application/services"
+	userHttp "github.com/felipersas/payflow/internal/user/interfaces/http"
+	"github.com/felipersas/payflow/internal/user/infrastructure/postgres"
 	"github.com/felipersas/payflow/pkg/config"
 	"github.com/felipersas/payflow/pkg/health"
-	"github.com/felipersas/payflow/pkg/messaging"
 	"github.com/felipersas/payflow/pkg/migrate"
 	"github.com/felipersas/payflow/pkg/middleware"
 	"github.com/felipersas/payflow/pkg/telemetry"
 	"github.com/go-chi/chi/v5"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
-	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -64,32 +60,8 @@ func main() {
 	}
 	logger.Info("database connected")
 
-	// 4. RabbitMQ
-	rabbitConn, err := connectRabbitMQ(cfg.RabbitMQURL, logger)
-	if err != nil {
-		logger.Error("connecting to rabbitmq", "error", err)
-		os.Exit(1)
-	}
-	defer rabbitConn.Close()
-
-	publisher, err := messaging.NewPublisher(rabbitConn, logger)
-	if err != nil {
-		logger.Error("creating publisher", "error", err)
-		os.Exit(1)
-	}
-	defer publisher.Close()
-
-	resilientPub := messaging.NewResilientPublisher(publisher, logger)
-
-	consumer, err := messaging.NewConsumer(rabbitConn, logger)
-	if err != nil {
-		logger.Error("creating consumer", "error", err)
-		os.Exit(1)
-	}
-	defer consumer.Close()
-
-	// 5. Composition Root (DDD: monta o grafo de dependências)
-	accountRepo := postgres.NewAccountRepository(pool)
+	// 4. Composition Root
+	userRepo := postgres.NewUserRepository(pool)
 
 	if err := migrate.Run(cfg.DatabaseURL, postgres.Migrations, "migrations"); err != nil {
 		logger.Error("running migrations", "error", err)
@@ -97,16 +69,14 @@ func main() {
 	}
 	logger.Info("migrations applied")
 
-	accountService := services.NewAccountService(accountRepo, resilientPub, logger)
-	accountHandler := accHttp.NewAccountHandler(accountService)
-	accountConsumer := accMessaging.NewAccountConsumer(accountService, consumer, resilientPub, logger)
+	authService := services.NewAuthService(userRepo, cfg.JWTSecret, logger)
+	authHandler := userHttp.NewAuthHandler(authService)
 
-	// 6. Health checks
+	// 5. Health checks
 	healthChecker := health.NewChecker()
 	healthChecker.AddCheck(health.DBCheck(pool))
-	healthChecker.AddCheck(health.RabbitMQCheck(rabbitConn))
 
-	// 7. HTTP Server
+	// 6. HTTP Server
 	r := chi.NewRouter()
 	r.Use(otelhttp.NewMiddleware(cfg.ServiceName))
 	r.Use(middleware.CorrelationID)
@@ -114,22 +84,13 @@ func main() {
 	r.Use(middleware.Recovery(logger))
 	r.Use(middleware.Metrics)
 
-	// Rotas protegidas (requer JWT)
-	r.Route("/accounts", func(r chi.Router) {
-		r.Use(middleware.Auth(cfg.JWTSecret))
-		accountHandler.Routes(r)
-	})
+	// Rotas públicas (auth não requer token)
+	r.Route("/auth", authHandler.Routes)
 
 	r.Get("/health", healthChecker.Handler())
 	r.Handle("/metrics", promhttp.Handler())
 
-	// 8. Start consumers
-	if err := accountConsumer.Start(ctx); err != nil {
-		logger.Error("starting consumer", "error", err)
-		os.Exit(1)
-	}
-
-	// 9. HTTP Server com graceful shutdown
+	// 7. HTTP Server com graceful shutdown
 	srv := &http.Server{
 		Addr:         ":" + cfg.ServicePort,
 		Handler:      r,
@@ -166,20 +127,4 @@ func main() {
 	}
 
 	logger.Info("server stopped")
-}
-
-func connectRabbitMQ(url string, logger *slog.Logger) (*amqp.Connection, error) {
-	var conn *amqp.Connection
-	var err error
-
-	for i := 0; i < 10; i++ {
-		conn, err = amqp.Dial(url)
-		if err == nil {
-			logger.Info("rabbitmq connected")
-			return conn, nil
-		}
-		logger.Warn("rabbitmq not ready, retrying...", "attempt", i+1, "error", err)
-		time.Sleep(2 * time.Second)
-	}
-	return nil, fmt.Errorf("failed to connect to rabbitmq after 10 attempts: %w", err)
 }
