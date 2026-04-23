@@ -113,7 +113,7 @@ func TestCreateTransfer_InvalidInput(t *testing.T) {
 
 	r.ServeHTTP(rec, req)
 
-	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Equal(t, http.StatusUnprocessableEntity, rec.Code)
 }
 
 func TestGetTransfer_Success(t *testing.T) {

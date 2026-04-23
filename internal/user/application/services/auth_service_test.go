@@ -55,37 +55,6 @@ func TestRegister_DuplicateEmail(t *testing.T) {
 	assert.Equal(t, "email already registered", err.Error())
 }
 
-func TestRegister_EmptyEmail(t *testing.T) {
-	svc, _ := setupService(t)
-
-	_, err := svc.Register(context.Background(), commands.RegisterCommand{
-		Email:    "",
-		Password: "password123",
-	})
-	require.Error(t, err)
-}
-
-func TestRegister_EmptyPassword(t *testing.T) {
-	svc, _ := setupService(t)
-
-	_, err := svc.Register(context.Background(), commands.RegisterCommand{
-		Email:    "test@test.com",
-		Password: "",
-	})
-	require.Error(t, err)
-}
-
-func TestRegister_ShortPassword(t *testing.T) {
-	svc, _ := setupService(t)
-
-	_, err := svc.Register(context.Background(), commands.RegisterCommand{
-		Email:    "test@test.com",
-		Password: "12345",
-	})
-	require.Error(t, err)
-	assert.Equal(t, "password must be at least 6 characters", err.Error())
-}
-
 func TestLogin_Valid(t *testing.T) {
 	svc, mockRepo := setupService(t)
 

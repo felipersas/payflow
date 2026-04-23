@@ -6,6 +6,7 @@ import (
 
 	"github.com/felipersas/payflow/internal/transfer/application/commands"
 	"github.com/felipersas/payflow/internal/transfer/application/services"
+	"github.com/felipersas/payflow/pkg/validation"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -23,16 +24,20 @@ func (h *TransferHandler) Routes(r chi.Router) {
 }
 
 type createTransferRequest struct {
-	FromAccountID string  `json:"from_account_id"`
-	ToAccountID   string  `json:"to_account_id"`
-	Amount        float64 `json:"amount"`
-	Currency      string  `json:"currency"`
+	FromAccountID string  `json:"from_account_id" validate:"required"`
+	ToAccountID   string  `json:"to_account_id" validate:"required"`
+	Amount        float64 `json:"amount" validate:"required,gt=0"`
+	Currency      string  `json:"currency" validate:"required,len=3"`
 }
 
 func (h *TransferHandler) CreateTransfer(w http.ResponseWriter, r *http.Request) {
 	var req createTransferRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	if err := validation.Validate(&req); err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": err.Error(), "fields": err.(*validation.ValidationError).Fields})
 		return
 	}
 

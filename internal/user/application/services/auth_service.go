@@ -44,13 +44,6 @@ type UserDTO struct {
 }
 
 func (s *AuthService) Register(ctx context.Context, cmd commands.RegisterCommand) (*AuthResult, error) {
-	if cmd.Email == "" || cmd.Password == "" {
-		return nil, fmt.Errorf("email and password are required")
-	}
-	if len(cmd.Password) < 6 {
-		return nil, fmt.Errorf("password must be at least 6 characters")
-	}
-
 	existing, _ := s.userRepo.GetByEmail(ctx, cmd.Email)
 	if existing != nil {
 		return nil, fmt.Errorf("email already registered")

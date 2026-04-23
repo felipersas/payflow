@@ -6,6 +6,7 @@ import (
 
 	"github.com/felipersas/payflow/internal/user/application/commands"
 	"github.com/felipersas/payflow/internal/user/application/services"
+	"github.com/felipersas/payflow/pkg/validation"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -25,11 +26,15 @@ func (h *AuthHandler) Routes(r chi.Router) {
 
 func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Email    string `json:"email"`
-		Password string `json:"password"`
+		Email    string `json:"email" validate:"required,email"`
+		Password string `json:"password" validate:"required,min=6"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	if err := validation.Validate(&req); err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": err.Error(), "fields": err.(*validation.ValidationError).Fields})
 		return
 	}
 
@@ -47,11 +52,15 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Email    string `json:"email"`
-		Password string `json:"password"`
+		Email    string `json:"email" validate:"required,email"`
+		Password string `json:"password" validate:"required"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	if err := validation.Validate(&req); err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": err.Error(), "fields": err.(*validation.ValidationError).Fields})
 		return
 	}
 

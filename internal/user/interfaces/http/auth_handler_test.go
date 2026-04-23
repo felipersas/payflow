@@ -195,3 +195,77 @@ func TestLogin_InvalidBody(t *testing.T) {
 
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
+
+func TestRegister_ValidationErrors(t *testing.T) {
+	tests := []struct {
+		name     string
+		body     map[string]string
+		wantCode int
+	}{
+		{"empty email", map[string]string{"email": "", "password": "password123"}, http.StatusUnprocessableEntity},
+		{"invalid email", map[string]string{"email": "not-an-email", "password": "password123"}, http.StatusUnprocessableEntity},
+		{"empty password", map[string]string{"email": "test@test.com", "password": ""}, http.StatusUnprocessableEntity},
+		{"short password", map[string]string{"email": "test@test.com", "password": "12345"}, http.StatusUnprocessableEntity},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+
+			mockRepo := repositories.NewMockUserRepository(ctrl)
+			h := setupAuthHandler(ctrl, mockRepo)
+			r := setupAuthRouter(h)
+
+			jsonBody, _ := json.Marshal(tt.body)
+			req := httptest.NewRequest("POST", "/auth/register", bytes.NewReader(jsonBody))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+
+			r.ServeHTTP(rec, req)
+
+			assert.Equal(t, tt.wantCode, rec.Code)
+
+			var resp map[string]any
+			err := json.Unmarshal(rec.Body.Bytes(), &resp)
+			require.NoError(t, err)
+			assert.Contains(t, resp, "fields")
+		})
+	}
+}
+
+func TestLogin_ValidationErrors(t *testing.T) {
+	tests := []struct {
+		name     string
+		body     map[string]string
+		wantCode int
+	}{
+		{"empty email", map[string]string{"email": "", "password": "password123"}, http.StatusUnprocessableEntity},
+		{"empty password", map[string]string{"email": "test@test.com", "password": ""}, http.StatusUnprocessableEntity},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+
+			mockRepo := repositories.NewMockUserRepository(ctrl)
+			h := setupAuthHandler(ctrl, mockRepo)
+			r := setupAuthRouter(h)
+
+			jsonBody, _ := json.Marshal(tt.body)
+			req := httptest.NewRequest("POST", "/auth/login", bytes.NewReader(jsonBody))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+
+			r.ServeHTTP(rec, req)
+
+			assert.Equal(t, tt.wantCode, rec.Code)
+
+			var resp map[string]any
+			err := json.Unmarshal(rec.Body.Bytes(), &resp)
+			require.NoError(t, err)
+			assert.Contains(t, resp, "fields")
+		})
+	}
+}

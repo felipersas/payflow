@@ -9,6 +9,7 @@ import (
 	"github.com/felipersas/payflow/internal/account/application/queries"
 	"github.com/felipersas/payflow/internal/account/application/services"
 	"github.com/felipersas/payflow/pkg/middleware"
+	"github.com/felipersas/payflow/pkg/validation"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -31,7 +32,7 @@ func (h *AccountHandler) Routes(r chi.Router) {
 }
 
 type createAccountRequest struct {
-	Currency string `json:"currency"`
+	Currency string `json:"currency" validate:"required,len=3"`
 }
 
 type accountResponse struct {
@@ -58,6 +59,10 @@ func (h *AccountHandler) CreateAccount(w http.ResponseWriter, r *http.Request) {
 	var req createAccountRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	if err := validation.Validate(&req); err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": err.Error(), "fields": err.(*validation.ValidationError).Fields})
 		return
 	}
 
@@ -102,8 +107,8 @@ func (h *AccountHandler) GetBalance(w http.ResponseWriter, r *http.Request) {
 }
 
 type creditDebitRequest struct {
-	Amount    int64  `json:"amount"`
-	Reference string `json:"reference"`
+	Amount    int64  `json:"amount" validate:"required,gt=0"`
+	Reference string `json:"reference" validate:"required"`
 }
 
 func (h *AccountHandler) CreditAccount(w http.ResponseWriter, r *http.Request) {
@@ -120,6 +125,10 @@ func (h *AccountHandler) CreditAccount(w http.ResponseWriter, r *http.Request) {
 	var req creditDebitRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	if err := validation.Validate(&req); err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": err.Error(), "fields": err.(*validation.ValidationError).Fields})
 		return
 	}
 
@@ -160,6 +169,10 @@ func (h *AccountHandler) DebitAccount(w http.ResponseWriter, r *http.Request) {
 	var req creditDebitRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	if err := validation.Validate(&req); err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": err.Error(), "fields": err.(*validation.ValidationError).Fields})
 		return
 	}
 
