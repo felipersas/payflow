@@ -17,59 +17,10 @@ import (
 	"github.com/felipersas/payflow/internal/account/domain/repositories"
 	"github.com/felipersas/payflow/pkg/middleware"
 	"github.com/go-chi/chi/v5"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 )
-
-type mockRepo struct {
-	accounts     map[string]*entities.Account
-	transactions map[string]*repositories.Transaction
-}
-
-func newMockRepo() *mockRepo {
-	return &mockRepo{
-		accounts:     make(map[string]*entities.Account),
-		transactions: make(map[string]*repositories.Transaction),
-	}
-}
-
-func (m *mockRepo) Create(_ context.Context, account *entities.Account) error {
-	m.accounts[account.ID] = account
-	return nil
-}
-
-func (m *mockRepo) GetByID(_ context.Context, id string) (*entities.Account, error) {
-	a, ok := m.accounts[id]
-	if !ok {
-		return nil, fmt.Errorf("account %s not found", id)
-	}
-	return a, nil
-}
-
-func (m *mockRepo) GetByUserID(_ context.Context, userID string) (*entities.Account, error) {
-	for _, a := range m.accounts {
-		if a.UserID == userID {
-			return a, nil
-		}
-	}
-	return nil, nil
-}
-
-func (m *mockRepo) Update(_ context.Context, account *entities.Account) error {
-	m.accounts[account.ID] = account
-	return nil
-}
-
-func (m *mockRepo) GetByReference(_ context.Context, reference string) (*repositories.Transaction, error) {
-	tx, ok := m.transactions[reference]
-	if !ok {
-		return nil, nil
-	}
-	return tx, nil
-}
-
-func (m *mockRepo) SaveTransaction(_ context.Context, tx *repositories.Transaction) error {
-	m.transactions[tx.Reference] = tx
-	return nil
-}
 
 func authMiddleware(userID string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
@@ -80,11 +31,10 @@ func authMiddleware(userID string) func(http.Handler) http.Handler {
 	}
 }
 
-func setupAccountHandler() (*AccountHandler, *mockRepo) {
-	repo := newMockRepo()
+func setupAccountHandler(ctrl *gomock.Controller, mockRepo *repositories.MockAccountRepository) *AccountHandler {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	svc := services.NewAccountService(repo, nil, logger)
-	return NewAccountHandler(svc), repo
+	svc := services.NewAccountService(mockRepo, nil, logger)
+	return NewAccountHandler(svc)
 }
 
 func setupAccountRouter(h *AccountHandler, userID string) *chi.Mux {
@@ -95,7 +45,13 @@ func setupAccountRouter(h *AccountHandler, userID string) *chi.Mux {
 }
 
 func TestCreateAccount_Success(t *testing.T) {
-	h, _ := setupAccountHandler()
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockRepo := repositories.NewMockAccountRepository(ctrl)
+	mockRepo.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
+
+	h := setupAccountHandler(ctrl, mockRepo)
 	r := setupAccountRouter(h, "user-1")
 
 	body := map[string]string{
@@ -109,39 +65,29 @@ func TestCreateAccount_Success(t *testing.T) {
 
 	r.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusCreated {
-		t.Errorf("status = %d, want %d", rec.Code, http.StatusCreated)
-	}
+	assert.Equal(t, http.StatusCreated, rec.Code)
 
 	var resp map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("failed to decode response: %v", err)
-	}
+	err := json.Unmarshal(rec.Body.Bytes(), &resp)
+	require.NoError(t, err)
 
-	if resp["id"] == nil {
-		t.Error("response missing id")
-	}
-	if resp["user_id"] == nil {
-		t.Error("response missing user_id")
-	}
-	if resp["user_id"] != "user-1" {
-		t.Errorf("user_id = %v, want user-1", resp["user_id"])
-	}
-	if resp["balance"] == nil {
-		t.Error("response missing balance")
-	}
-	if resp["balance"] != float64(0) {
-		t.Errorf("balance = %v, want 0", resp["balance"])
-	}
+	assert.NotNil(t, resp["id"])
+	assert.NotNil(t, resp["user_id"])
+	assert.Equal(t, "user-1", resp["user_id"])
+	assert.NotNil(t, resp["balance"])
+	assert.Equal(t, float64(0), resp["balance"])
 }
 
 func TestGetBalance_Success(t *testing.T) {
-	h, repo := setupAccountHandler()
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
 
-	// Create an account directly
+	mockRepo := repositories.NewMockAccountRepository(ctrl)
 	account, _ := entities.NewAccount("user-1", "BRL")
-	repo.Create(context.Background(), account)
 
+	mockRepo.EXPECT().GetByID(gomock.Any(), account.ID).Return(account, nil).Times(2)
+
+	h := setupAccountHandler(ctrl, mockRepo)
 	r := setupAccountRouter(h, "user-1")
 
 	req := httptest.NewRequest("GET", "/accounts/"+account.ID+"/balance", nil)
@@ -149,31 +95,26 @@ func TestGetBalance_Success(t *testing.T) {
 
 	r.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Errorf("status = %d, want %d", rec.Code, http.StatusOK)
-	}
+	assert.Equal(t, http.StatusOK, rec.Code)
 
 	var resp map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("failed to decode response: %v", err)
-	}
+	err := json.Unmarshal(rec.Body.Bytes(), &resp)
+	require.NoError(t, err)
 
-	if resp["balance"] == nil {
-		t.Error("response missing balance")
-	}
-	if resp["balance"] != float64(0) {
-		t.Errorf("balance = %v, want 0", resp["balance"])
-	}
+	assert.NotNil(t, resp["balance"])
+	assert.Equal(t, float64(0), resp["balance"])
 }
 
 func TestGetBalance_WrongOwner(t *testing.T) {
-	h, repo := setupAccountHandler()
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
 
-	// Create an account for user-1
+	mockRepo := repositories.NewMockAccountRepository(ctrl)
 	account, _ := entities.NewAccount("user-1", "BRL")
-	repo.Create(context.Background(), account)
 
-	// Request as user-2
+	mockRepo.EXPECT().GetByID(gomock.Any(), account.ID).Return(account, nil)
+
+	h := setupAccountHandler(ctrl, mockRepo)
 	r := setupAccountRouter(h, "user-2")
 
 	req := httptest.NewRequest("GET", "/accounts/"+account.ID+"/balance", nil)
@@ -181,13 +122,18 @@ func TestGetBalance_WrongOwner(t *testing.T) {
 
 	r.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusForbidden {
-		t.Errorf("status = %d, want %d", rec.Code, http.StatusForbidden)
-	}
+	assert.Equal(t, http.StatusForbidden, rec.Code)
 }
 
 func TestGetBalance_NotFound(t *testing.T) {
-	h, _ := setupAccountHandler()
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockRepo := repositories.NewMockAccountRepository(ctrl)
+
+	mockRepo.EXPECT().GetByID(gomock.Any(), "nonexistent").Return(nil, fmt.Errorf("account not found"))
+
+	h := setupAccountHandler(ctrl, mockRepo)
 	r := setupAccountRouter(h, "user-1")
 
 	req := httptest.NewRequest("GET", "/accounts/nonexistent/balance", nil)
@@ -195,20 +141,23 @@ func TestGetBalance_NotFound(t *testing.T) {
 
 	r.ServeHTTP(rec, req)
 
-	// The handler checks ownership first, which fails for non-existent accounts
-	// returning 403 (Forbidden) since the account doesn't belong to the user
-	if rec.Code != http.StatusForbidden {
-		t.Errorf("status = %d, want %d", rec.Code, http.StatusForbidden)
-	}
+	// Returns 403 because the handler checks ownership first, which fails for non-existent accounts
+	assert.Equal(t, http.StatusForbidden, rec.Code)
 }
 
 func TestCreditAccount_Success(t *testing.T) {
-	h, repo := setupAccountHandler()
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
 
-	// Create an account directly
+	mockRepo := repositories.NewMockAccountRepository(ctrl)
 	account, _ := entities.NewAccount("user-1", "BRL")
-	repo.Create(context.Background(), account)
 
+	mockRepo.EXPECT().GetByReference(gomock.Any(), "ref-1").Return(nil, nil)
+	mockRepo.EXPECT().GetByID(gomock.Any(), account.ID).Return(account, nil).AnyTimes()
+	mockRepo.EXPECT().Update(gomock.Any(), gomock.Any()).Return(nil)
+	mockRepo.EXPECT().SaveTransaction(gomock.Any(), gomock.Any()).Return(nil)
+
+	h := setupAccountHandler(ctrl, mockRepo)
 	r := setupAccountRouter(h, "user-1")
 
 	body := map[string]any{
@@ -223,37 +172,49 @@ func TestCreditAccount_Success(t *testing.T) {
 
 	r.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Errorf("status = %d, want %d", rec.Code, http.StatusOK)
-	}
+	assert.Equal(t, http.StatusOK, rec.Code)
 
 	var resp map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("failed to decode response: %v", err)
-	}
+	err := json.Unmarshal(rec.Body.Bytes(), &resp)
+	require.NoError(t, err)
 
-	if resp["balance"] == nil {
-		t.Error("response missing balance")
-	}
-	if resp["balance"] != float64(5000) {
-		t.Errorf("balance = %v, want 5000", resp["balance"])
-	}
+	assert.NotNil(t, resp["balance"])
+	assert.Equal(t, float64(5000), resp["balance"])
 }
 
 func TestDebitAccount_Success(t *testing.T) {
-	h, repo := setupAccountHandler()
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
 
-	// Create and credit an account
+	mockRepo := repositories.NewMockAccountRepository(ctrl)
 	account, _ := entities.NewAccount("user-1", "BRL")
-	repo.Create(context.Background(), account)
 
-	svc := services.NewAccountService(repo, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	// Credit the account first
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	svc := services.NewAccountService(mockRepo, nil, logger)
+
+	mockRepo.EXPECT().GetByReference(gomock.Any(), "init-credit").Return(nil, nil)
+	mockRepo.EXPECT().GetByID(gomock.Any(), account.ID).Return(account, nil).AnyTimes()
+	mockRepo.EXPECT().Update(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+	mockRepo.EXPECT().SaveTransaction(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+
 	svc.CreditAccount(context.Background(), commands.CreditAccountCommand{
 		AccountID: account.ID,
 		Amount:    10000,
 		Reference: "init-credit",
 	})
 
+	// Reset expectations for debit test
+	ctrl.Finish()
+	ctrl = gomock.NewController(t)
+	mockRepo = repositories.NewMockAccountRepository(ctrl)
+
+	mockRepo.EXPECT().GetByReference(gomock.Any(), "debit-ref").Return(nil, nil)
+	mockRepo.EXPECT().GetByID(gomock.Any(), account.ID).Return(account, nil).AnyTimes()
+	mockRepo.EXPECT().Update(gomock.Any(), gomock.Any()).Return(nil)
+	mockRepo.EXPECT().SaveTransaction(gomock.Any(), gomock.Any()).Return(nil)
+
+	h := setupAccountHandler(ctrl, mockRepo)
 	r := setupAccountRouter(h, "user-1")
 
 	body := map[string]any{
@@ -268,30 +229,29 @@ func TestDebitAccount_Success(t *testing.T) {
 
 	r.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Errorf("status = %d, want %d", rec.Code, http.StatusOK)
-	}
+	assert.Equal(t, http.StatusOK, rec.Code)
 
 	var resp map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("failed to decode response: %v", err)
-	}
+	err := json.Unmarshal(rec.Body.Bytes(), &resp)
+	require.NoError(t, err)
 
-	if resp["balance"] == nil {
-		t.Error("response missing balance")
-	}
-	if resp["balance"] != float64(7000) {
-		t.Errorf("balance = %v, want 7000", resp["balance"])
-	}
+	assert.NotNil(t, resp["balance"])
+	assert.Equal(t, float64(7000), resp["balance"])
 }
 
 func TestDebitAccount_InsufficientBalance(t *testing.T) {
-	h, repo := setupAccountHandler()
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
 
-	// Create an account with zero balance
+	mockRepo := repositories.NewMockAccountRepository(ctrl)
 	account, _ := entities.NewAccount("user-1", "BRL")
-	repo.Create(context.Background(), account)
 
+	mockRepo.EXPECT().GetByReference(gomock.Any(), "debit-ref").Return(nil, nil)
+	mockRepo.EXPECT().GetByID(gomock.Any(), account.ID).Return(account, nil).AnyTimes()
+	mockRepo.EXPECT().Update(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+	mockRepo.EXPECT().SaveTransaction(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+
+	h := setupAccountHandler(ctrl, mockRepo)
 	r := setupAccountRouter(h, "user-1")
 
 	body := map[string]any{
@@ -306,16 +266,11 @@ func TestDebitAccount_InsufficientBalance(t *testing.T) {
 
 	r.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusUnprocessableEntity {
-		t.Errorf("status = %d, want %d", rec.Code, http.StatusUnprocessableEntity)
-	}
+	assert.Equal(t, http.StatusUnprocessableEntity, rec.Code)
 
 	var resp map[string]string
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("failed to decode response: %v", err)
-	}
+	err := json.Unmarshal(rec.Body.Bytes(), &resp)
+	require.NoError(t, err)
 
-	if resp["error"] == "" {
-		t.Error("response missing error message")
-	}
+	assert.NotEmpty(t, resp["error"])
 }

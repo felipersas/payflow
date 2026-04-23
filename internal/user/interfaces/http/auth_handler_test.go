@@ -2,65 +2,26 @@ package http
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"sync"
 	"testing"
 
 	"github.com/felipersas/payflow/internal/user/application/services"
 	"github.com/felipersas/payflow/internal/user/domain/entities"
+	"github.com/felipersas/payflow/internal/user/domain/repositories"
 	"github.com/go-chi/chi/v5"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 )
 
-type mockUserRepo struct {
-	usersByEmail map[string]*entities.User
-	usersByID    map[string]*entities.User
-	mu           sync.Mutex
-}
-
-func newMockUserRepo() *mockUserRepo {
-	return &mockUserRepo{
-		usersByEmail: make(map[string]*entities.User),
-		usersByID:    make(map[string]*entities.User),
-	}
-}
-
-func (m *mockUserRepo) Create(_ context.Context, user *entities.User) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.usersByEmail[user.Email] = user
-	m.usersByID[user.ID] = user
-	return nil
-}
-
-func (m *mockUserRepo) GetByEmail(_ context.Context, email string) (*entities.User, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	u, ok := m.usersByEmail[email]
-	if !ok {
-		return nil, nil
-	}
-	return u, nil
-}
-
-func (m *mockUserRepo) GetByID(_ context.Context, id string) (*entities.User, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	u, ok := m.usersByID[id]
-	if !ok {
-		return nil, nil
-	}
-	return u, nil
-}
-
-func setupAuthHandler() *AuthHandler {
-	repo := newMockUserRepo()
+func setupAuthHandler(ctrl *gomock.Controller, mockRepo *repositories.MockUserRepository) *AuthHandler {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	svc := services.NewAuthService(repo, "test-secret-key-at-least-32b", logger)
+	svc := services.NewAuthService(mockRepo, "test-secret-key-at-least-32b", logger)
 	return NewAuthHandler(svc)
 }
 
@@ -70,8 +31,19 @@ func setupAuthRouter(h *AuthHandler) *chi.Mux {
 	return r
 }
 
+// bcrypt hash of "password123"
+var hashedPassword = "$2a$10$O83PGgbOzzRbN8WyUsiiZ.nK8G/USIUIgKAYmdKAqaDUQ6nBWyXlC"
+
+
 func TestRegister_Success(t *testing.T) {
-	h := setupAuthHandler()
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockRepo := repositories.NewMockUserRepository(ctrl)
+	mockRepo.EXPECT().GetByEmail(gomock.Any(), "test@test.com").Return(nil, fmt.Errorf("not found"))
+	mockRepo.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
+
+	h := setupAuthHandler(ctrl, mockRepo)
 	r := setupAuthRouter(h)
 
 	body := map[string]string{
@@ -86,25 +58,22 @@ func TestRegister_Success(t *testing.T) {
 
 	r.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusCreated {
-		t.Errorf("status = %d, want %d", rec.Code, http.StatusCreated)
-	}
+	assert.Equal(t, http.StatusCreated, rec.Code)
 
 	var resp map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("failed to decode response: %v", err)
-	}
+	err := json.Unmarshal(rec.Body.Bytes(), &resp)
+	require.NoError(t, err)
 
-	if resp["token"] == nil {
-		t.Error("response missing token")
-	}
-	if resp["user"] == nil {
-		t.Error("response missing user")
-	}
+	assert.NotNil(t, resp["token"])
+	assert.NotNil(t, resp["user"])
 }
 
 func TestRegister_InvalidBody(t *testing.T) {
-	h := setupAuthHandler()
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockRepo := repositories.NewMockUserRepository(ctrl)
+	h := setupAuthHandler(ctrl, mockRepo)
 	r := setupAuthRouter(h)
 
 	req := httptest.NewRequest("POST", "/auth/register", bytes.NewReader([]byte("invalid json")))
@@ -113,13 +82,21 @@ func TestRegister_InvalidBody(t *testing.T) {
 
 	r.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want %d", rec.Code, http.StatusBadRequest)
-	}
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
 func TestRegister_DuplicateEmail(t *testing.T) {
-	h := setupAuthHandler()
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockRepo := repositories.NewMockUserRepository(ctrl)
+	existingUser, err := entities.NewUser("test@test.com", "password123")
+	require.NoError(t, err)
+
+	// Second registration finds existing user
+	mockRepo.EXPECT().GetByEmail(gomock.Any(), "test@test.com").Return(existingUser, nil)
+
+	h := setupAuthHandler(ctrl, mockRepo)
 	r := setupAuthRouter(h)
 
 	body := map[string]string{
@@ -128,56 +105,33 @@ func TestRegister_DuplicateEmail(t *testing.T) {
 	}
 	jsonBody, _ := json.Marshal(body)
 
-	// First registration
-	req1 := httptest.NewRequest("POST", "/auth/register", bytes.NewReader(jsonBody))
-	req1.Header.Set("Content-Type", "application/json")
-	rec1 := httptest.NewRecorder()
-	r.ServeHTTP(rec1, req1)
+	req := httptest.NewRequest("POST", "/auth/register", bytes.NewReader(jsonBody))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
 
-	if rec1.Code != http.StatusCreated {
-		t.Fatalf("first registration failed with status %d", rec1.Code)
-	}
+	r.ServeHTTP(rec, req)
 
-	// Second registration with same email
-	req2 := httptest.NewRequest("POST", "/auth/register", bytes.NewReader(jsonBody))
-	req2.Header.Set("Content-Type", "application/json")
-	rec2 := httptest.NewRecorder()
-	r.ServeHTTP(rec2, req2)
-
-	if rec2.Code != http.StatusBadRequest {
-		t.Errorf("second registration status = %d, want %d", rec2.Code, http.StatusBadRequest)
-	}
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
 
 	var resp map[string]string
-	if err := json.Unmarshal(rec2.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("failed to decode response: %v", err)
-	}
+	err = json.Unmarshal(rec.Body.Bytes(), &resp)
+	require.NoError(t, err)
 
-	if resp["error"] == "" {
-		t.Error("response missing error message")
-	}
+	assert.NotEmpty(t, resp["error"])
 }
 
 func TestLogin_Success(t *testing.T) {
-	h := setupAuthHandler()
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockRepo := repositories.NewMockUserRepository(ctrl)
+	existingUser, _ := entities.NewUser("test@test.com", hashedPassword)
+
+	mockRepo.EXPECT().GetByEmail(gomock.Any(), "test@test.com").Return(existingUser, nil)
+
+	h := setupAuthHandler(ctrl, mockRepo)
 	r := setupAuthRouter(h)
 
-	// Register first
-	registerBody := map[string]string{
-		"email":    "test@test.com",
-		"password": "password123",
-	}
-	jsonBody, _ := json.Marshal(registerBody)
-	reqReg := httptest.NewRequest("POST", "/auth/register", bytes.NewReader(jsonBody))
-	reqReg.Header.Set("Content-Type", "application/json")
-	recReg := httptest.NewRecorder()
-	r.ServeHTTP(recReg, reqReg)
-
-	if recReg.Code != http.StatusCreated {
-		t.Fatalf("registration failed with status %d", recReg.Code)
-	}
-
-	// Login
 	loginBody := map[string]string{
 		"email":    "test@test.com",
 		"password": "password123",
@@ -189,36 +143,28 @@ func TestLogin_Success(t *testing.T) {
 
 	r.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Errorf("status = %d, want %d", rec.Code, http.StatusOK)
-	}
+	assert.Equal(t, http.StatusOK, rec.Code)
 
 	var resp map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("failed to decode response: %v", err)
-	}
+	err := json.Unmarshal(rec.Body.Bytes(), &resp)
+	require.NoError(t, err)
 
-	if resp["token"] == nil {
-		t.Error("response missing token")
-	}
+	assert.NotNil(t, resp["token"])
+	assert.NotNil(t, resp["user"])
 }
 
 func TestLogin_WrongPassword(t *testing.T) {
-	h := setupAuthHandler()
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockRepo := repositories.NewMockUserRepository(ctrl)
+	existingUser, _ := entities.NewUser("test@test.com", hashedPassword)
+
+	mockRepo.EXPECT().GetByEmail(gomock.Any(), "test@test.com").Return(existingUser, nil)
+
+	h := setupAuthHandler(ctrl, mockRepo)
 	r := setupAuthRouter(h)
 
-	// Register first
-	registerBody := map[string]string{
-		"email":    "test@test.com",
-		"password": "password123",
-	}
-	jsonBody, _ := json.Marshal(registerBody)
-	reqReg := httptest.NewRequest("POST", "/auth/register", bytes.NewReader(jsonBody))
-	reqReg.Header.Set("Content-Type", "application/json")
-	recReg := httptest.NewRecorder()
-	r.ServeHTTP(recReg, reqReg)
-
-	// Login with wrong password
 	loginBody := map[string]string{
 		"email":    "test@test.com",
 		"password": "wrongpassword",
@@ -230,13 +176,15 @@ func TestLogin_WrongPassword(t *testing.T) {
 
 	r.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
-	}
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
 }
 
 func TestLogin_InvalidBody(t *testing.T) {
-	h := setupAuthHandler()
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockRepo := repositories.NewMockUserRepository(ctrl)
+	h := setupAuthHandler(ctrl, mockRepo)
 	r := setupAuthRouter(h)
 
 	req := httptest.NewRequest("POST", "/auth/login", bytes.NewReader([]byte("invalid json")))
@@ -245,7 +193,5 @@ func TestLogin_InvalidBody(t *testing.T) {
 
 	r.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want %d", rec.Code, http.StatusBadRequest)
-	}
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }

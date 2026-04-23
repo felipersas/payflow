@@ -6,6 +6,8 @@ import (
 	"github.com/felipersas/payflow/internal/account/domain/entities"
 )
 
+//go:generate mockgen -source=account_repository.go -destination=mock_account_repository.go -package=repositories
+
 // AccountRepository é o contrato (porta) do DDD.
 // A camada de domínio define a interface; a infraestrutura implementa.
 type AccountRepository interface {

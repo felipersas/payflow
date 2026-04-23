@@ -5,18 +5,17 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestChecker_NoChecks(t *testing.T) {
 	c := NewChecker()
 	results, status := c.Check()
 
-	if len(results) != 0 {
-		t.Errorf("results length: got %d, want 0", len(results))
-	}
-	if status != StatusHealthy {
-		t.Errorf("status: got %s, want %s", status, StatusHealthy)
-	}
+	assert.Empty(t, results, "results should be empty")
+	assert.Equal(t, StatusHealthy, status, "status should be healthy")
 }
 
 func TestChecker_AllHealthy(t *testing.T) {
@@ -27,15 +26,9 @@ func TestChecker_AllHealthy(t *testing.T) {
 
 	results, status := c.Check()
 
-	if len(results) != 1 {
-		t.Errorf("results length: got %d, want 1", len(results))
-	}
-	if status != StatusHealthy {
-		t.Errorf("status: got %s, want %s", status, StatusHealthy)
-	}
-	if results[0].Name != "db" {
-		t.Errorf("check name: got %s, want db", results[0].Name)
-	}
+	assert.Len(t, results, 1, "results length mismatch")
+	assert.Equal(t, StatusHealthy, status, "status should be healthy")
+	assert.Equal(t, "db", results[0].Name, "check name mismatch")
 }
 
 func TestChecker_Unhealthy(t *testing.T) {
@@ -46,12 +39,8 @@ func TestChecker_Unhealthy(t *testing.T) {
 
 	results, status := c.Check()
 
-	if len(results) != 1 {
-		t.Errorf("results length: got %d, want 1", len(results))
-	}
-	if status != StatusUnhealthy {
-		t.Errorf("status: got %s, want %s", status, StatusUnhealthy)
-	}
+	assert.Len(t, results, 1, "results length mismatch")
+	assert.Equal(t, StatusUnhealthy, status, "status should be unhealthy")
 }
 
 func TestChecker_Mixed(t *testing.T) {
@@ -65,12 +54,8 @@ func TestChecker_Mixed(t *testing.T) {
 
 	results, status := c.Check()
 
-	if len(results) != 2 {
-		t.Errorf("results length: got %d, want 2", len(results))
-	}
-	if status != StatusDegraded {
-		t.Errorf("status: got %s, want %s", status, StatusDegraded)
-	}
+	assert.Len(t, results, 2, "results length mismatch")
+	assert.Equal(t, StatusDegraded, status, "status should be degraded")
 }
 
 func TestChecker_HealthyAndUnhealthy(t *testing.T) {
@@ -84,12 +69,8 @@ func TestChecker_HealthyAndUnhealthy(t *testing.T) {
 
 	results, status := c.Check()
 
-	if len(results) != 2 {
-		t.Errorf("results length: got %d, want 2", len(results))
-	}
-	if status != StatusUnhealthy {
-		t.Errorf("status: got %s, want %s (unhealthy wins)", status, StatusUnhealthy)
-	}
+	assert.Len(t, results, 2, "results length mismatch")
+	assert.Equal(t, StatusUnhealthy, status, "unhealthy should win")
 }
 
 func TestHandler_Healthy(t *testing.T) {
@@ -104,21 +85,14 @@ func TestHandler_Healthy(t *testing.T) {
 
 	handler(rr, req)
 
-	if rr.Code != http.StatusOK {
-		t.Errorf("status code: got %d, want %d", rr.Code, http.StatusOK)
-	}
+	assert.Equal(t, http.StatusOK, rr.Code, "status code mismatch")
 
 	var resp map[string]interface{}
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("failed to decode response: %v", err)
-	}
+	err := json.NewDecoder(rr.Body).Decode(&resp)
+	require.NoError(t, err, "failed to decode response")
 
-	if resp["status"] != string(StatusHealthy) {
-		t.Errorf("response status: got %v, want %s", resp["status"], StatusHealthy)
-	}
-	if resp["service"] != "account-service" {
-		t.Errorf("response service: got %v, want account-service", resp["service"])
-	}
+	assert.Equal(t, string(StatusHealthy), resp["status"], "response status mismatch")
+	assert.Equal(t, "account-service", resp["service"], "response service mismatch")
 }
 
 func TestHandler_Unhealthy(t *testing.T) {
@@ -133,16 +107,11 @@ func TestHandler_Unhealthy(t *testing.T) {
 
 	handler(rr, req)
 
-	if rr.Code != http.StatusServiceUnavailable {
-		t.Errorf("status code: got %d, want %d", rr.Code, http.StatusServiceUnavailable)
-	}
+	assert.Equal(t, http.StatusServiceUnavailable, rr.Code, "status code mismatch")
 
 	var resp map[string]interface{}
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("failed to decode response: %v", err)
-	}
+	err := json.NewDecoder(rr.Body).Decode(&resp)
+	require.NoError(t, err, "failed to decode response")
 
-	if resp["status"] != string(StatusUnhealthy) {
-		t.Errorf("response status: got %v, want %s", resp["status"], StatusUnhealthy)
-	}
+	assert.Equal(t, string(StatusUnhealthy), resp["status"], "response status mismatch")
 }

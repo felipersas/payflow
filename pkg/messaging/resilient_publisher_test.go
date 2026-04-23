@@ -5,112 +5,82 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"strings"
 	"testing"
 
-	"github.com/sony/gobreaker"
+	"github.com/stretchr/testify/assert"
+	"go.uber.org/mock/gomock"
 )
-
-type mockPublisher struct {
-	calls int
-	err   error
-	closeCalled bool
-}
-
-func (m *mockPublisher) Publish(_ context.Context, _ string, _ any) error {
-	m.calls++
-	return m.err
-}
-
-func (m *mockPublisher) Close() error {
-	m.closeCalled = true
-	return nil
-}
 
 func newLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
 func TestResilientPublisher_Success(t *testing.T) {
-	mock := &mockPublisher{err: nil}
-	pub := NewResilientPublisher(mock, newLogger())
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockPub := NewMockMessagePublisher(ctrl)
+	pub := NewResilientPublisher(mockPub, newLogger())
 
 	ctx := context.Background()
+	mockPub.EXPECT().Publish(ctx, "test.key", "event").Return(nil)
+
 	err := pub.Publish(ctx, "test.key", "event")
 
-	if err != nil {
-		t.Errorf("Publish failed: %v", err)
-	}
-	if mock.calls != 1 {
-		t.Errorf("mock.calls: got %d, want 1", mock.calls)
-	}
+	assert.NoError(t, err, "Publish failed")
 }
 
 func TestResilientPublisher_Failure(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
 	mockErr := errors.New("broker unavailable")
-	mock := &mockPublisher{err: mockErr}
-	pub := NewResilientPublisher(mock, newLogger())
+	mockPub := NewMockMessagePublisher(ctrl)
+	pub := NewResilientPublisher(mockPub, newLogger())
 
 	ctx := context.Background()
+	mockPub.EXPECT().Publish(ctx, "test.key", "event").Return(mockErr)
+
 	err := pub.Publish(ctx, "test.key", "event")
 
-	if err == nil {
-		t.Error("expected error, got nil")
-	}
-	if !strings.Contains(err.Error(), "circuit breaker") {
-		t.Errorf("error should mention 'circuit breaker': %v", err)
-	}
-	if mock.calls != 1 {
-		t.Errorf("mock.calls: got %d, want 1", mock.calls)
-	}
+	assert.Error(t, err, "expected error")
+	assert.Contains(t, err.Error(), "circuit breaker", "error should mention 'circuit breaker'")
 }
 
 func TestResilientPublisher_CircuitBreaker(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
 	mockErr := errors.New("broker unavailable")
-	mock := &mockPublisher{err: mockErr}
-	pub := NewResilientPublisher(mock, newLogger())
+	mockPub := NewMockMessagePublisher(ctrl)
+	pub := NewResilientPublisher(mockPub, newLogger())
 
 	ctx := context.Background()
 
 	// First 5 calls should fail and increment consecutive failures
 	for i := 0; i < 5; i++ {
+		mockPub.EXPECT().Publish(ctx, "test.key", "event").Return(mockErr)
 		err := pub.Publish(ctx, "test.key", "event")
-		if err == nil {
-			t.Errorf("call %d: expected error, got nil", i+1)
-		}
-		if !strings.Contains(err.Error(), "circuit breaker") {
-			t.Errorf("call %d: error should mention 'circuit breaker': %v", i+1, err)
-		}
+		assert.Error(t, err, "call %d: expected error", i+1)
+		assert.Contains(t, err.Error(), "circuit breaker", "call %d: error should mention 'circuit breaker'", i+1)
 	}
 
 	// 6th call should get gobreaker.ErrOpenState wrapped
+	mockPub.EXPECT().Publish(ctx, "test.key", "event").Return(mockErr)
 	err := pub.Publish(ctx, "test.key", "event")
-	if err == nil {
-		t.Error("6th call: expected error, got nil")
-	}
-	// Check for open state error
-	if !strings.Contains(err.Error(), "circuit breaker") {
-		t.Errorf("6th call error should mention 'circuit breaker': %v", err)
-	}
-	if !errors.Is(err, gobreaker.ErrOpenState) && !strings.Contains(err.Error(), gobreaker.ErrOpenState.Error()) {
-		// The error is wrapped, so we check the message
-		t.Logf("6th call error: %v", err)
-	}
-
-	if mock.calls != 6 {
-		t.Errorf("mock.calls: got %d, want 6", mock.calls)
-	}
+	assert.Error(t, err, "6th call: expected error")
+	assert.Contains(t, err.Error(), "circuit breaker", "6th call error should mention 'circuit breaker'")
 }
 
 func TestResilientPublisher_Close(t *testing.T) {
-	mock := &mockPublisher{err: nil}
-	pub := NewResilientPublisher(mock, newLogger())
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockPub := NewMockMessagePublisher(ctrl)
+	pub := NewResilientPublisher(mockPub, newLogger())
+
+	mockPub.EXPECT().Close().Return(nil)
 
 	err := pub.Close()
-	if err != nil {
-		t.Errorf("Close failed: %v", err)
-	}
-	if !mock.closeCalled {
-		t.Error("expected mock.Close() to be called")
-	}
+	assert.NoError(t, err, "Close failed")
 }

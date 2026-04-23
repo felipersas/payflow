@@ -4,11 +4,12 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/felipersas/payflow/pkg/auth"
 	"github.com/go-chi/chi/v5"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func setupAuthMiddleware(secret string) http.Handler {
@@ -25,9 +26,7 @@ func TestAuth_ValidToken(t *testing.T) {
 	secret := "test-secret"
 	userID := "user-123"
 	token, err := auth.GenerateToken(secret, userID)
-	if err != nil {
-		t.Fatalf("GenerateToken failed: %v", err)
-	}
+	require.NoError(t, err, "GenerateToken failed")
 
 	r := setupAuthMiddleware(secret)
 	req := httptest.NewRequest("GET", "/test", nil)
@@ -36,13 +35,9 @@ func TestAuth_ValidToken(t *testing.T) {
 
 	r.ServeHTTP(rr, req)
 
-	if rr.Code != http.StatusOK {
-		t.Errorf("status code: got %d, want %d", rr.Code, http.StatusOK)
-	}
+	assert.Equal(t, http.StatusOK, rr.Code, "status code mismatch")
 	body := rr.Body.String()
-	if body != userID {
-		t.Errorf("response body: got %s, want %s", body, userID)
-	}
+	assert.Equal(t, userID, body, "response body mismatch")
 }
 
 func TestAuth_MissingHeader(t *testing.T) {
@@ -54,13 +49,9 @@ func TestAuth_MissingHeader(t *testing.T) {
 
 	r.ServeHTTP(rr, req)
 
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("status code: got %d, want %d", rr.Code, http.StatusUnauthorized)
-	}
+	assert.Equal(t, http.StatusUnauthorized, rr.Code, "status code mismatch")
 	body := rr.Body.String()
-	if !strings.Contains(body, "missing authorization header") {
-		t.Errorf("error message not found in response: %s", body)
-	}
+	assert.Contains(t, body, "missing authorization header", "error message not found in response")
 }
 
 func TestAuth_BadFormat(t *testing.T) {
@@ -73,9 +64,7 @@ func TestAuth_BadFormat(t *testing.T) {
 
 	r.ServeHTTP(rr, req)
 
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("status code: got %d, want %d", rr.Code, http.StatusUnauthorized)
-	}
+	assert.Equal(t, http.StatusUnauthorized, rr.Code, "status code mismatch")
 }
 
 func TestAuth_InvalidToken(t *testing.T) {
@@ -88,18 +77,12 @@ func TestAuth_InvalidToken(t *testing.T) {
 
 	r.ServeHTTP(rr, req)
 
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("status code: got %d, want %d", rr.Code, http.StatusUnauthorized)
-	}
+	assert.Equal(t, http.StatusUnauthorized, rr.Code, "status code mismatch")
 	body := rr.Body.String()
-	if !strings.Contains(body, "invalid or expired token") {
-		t.Errorf("error message not found in response: %s", body)
-	}
+	assert.Contains(t, body, "invalid or expired token", "error message not found in response")
 }
 
 func TestGetUserID_EmptyContext(t *testing.T) {
 	userID := GetUserID(context.Background())
-	if userID != "" {
-		t.Errorf("GetUserID with empty context: got %s, want empty string", userID)
-	}
+	assert.Equal(t, "", userID, "GetUserID with empty context should return empty string")
 }

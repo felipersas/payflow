@@ -6,6 +6,8 @@ import (
 	"github.com/felipersas/payflow/internal/user/domain/entities"
 )
 
+//go:generate mockgen -source=user_repository.go -destination=mock_user_repository.go -package=repositories
+
 // UserRepository é o contrato para persistência de usuários.
 type UserRepository interface {
 	Create(ctx context.Context, user *entities.User) error

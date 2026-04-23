@@ -8,6 +8,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func setupCorrelationMiddleware() http.Handler {
@@ -30,19 +32,13 @@ func TestCorrelationID_PassThrough(t *testing.T) {
 
 	r.ServeHTTP(rr, req)
 
-	if rr.Code != http.StatusOK {
-		t.Errorf("status code: got %d, want %d", rr.Code, http.StatusOK)
-	}
+	assert.Equal(t, http.StatusOK, rr.Code, "status code mismatch")
 
 	responseID := rr.Header().Get("X-Correlation-ID")
-	if responseID != correlationID {
-		t.Errorf("response header: got %s, want %s", responseID, correlationID)
-	}
+	assert.Equal(t, correlationID, responseID, "response header mismatch")
 
 	body := rr.Body.String()
-	if body != correlationID {
-		t.Errorf("response body: got %s, want %s", body, correlationID)
-	}
+	assert.Equal(t, correlationID, body, "response body mismatch")
 }
 
 func TestCorrelationID_GenerateNew(t *testing.T) {
@@ -53,29 +49,19 @@ func TestCorrelationID_GenerateNew(t *testing.T) {
 
 	r.ServeHTTP(rr, req)
 
-	if rr.Code != http.StatusOK {
-		t.Errorf("status code: got %d, want %d", rr.Code, http.StatusOK)
-	}
+	assert.Equal(t, http.StatusOK, rr.Code, "status code mismatch")
 
 	responseID := rr.Header().Get("X-Correlation-ID")
-	if responseID == "" {
-		t.Error("expected non-empty X-Correlation-ID header")
-	}
+	assert.NotEmpty(t, responseID, "expected non-empty X-Correlation-ID header")
 
 	_, err := uuid.Parse(responseID)
-	if err != nil {
-		t.Errorf("X-Correlation-ID is not a valid UUID: %v", err)
-	}
+	require.NoError(t, err, "X-Correlation-ID is not a valid UUID")
 
 	body := rr.Body.String()
-	if body != responseID {
-		t.Errorf("response body mismatch: got %s, want %s", body, responseID)
-	}
+	assert.Equal(t, responseID, body, "response body mismatch")
 }
 
 func TestGetCorrelationID_EmptyContext(t *testing.T) {
 	id := GetCorrelationID(context.Background())
-	if id != "" {
-		t.Errorf("GetCorrelationID with empty context: got %s, want empty string", id)
-	}
+	assert.Equal(t, "", id, "GetCorrelationID with empty context should return empty string")
 }

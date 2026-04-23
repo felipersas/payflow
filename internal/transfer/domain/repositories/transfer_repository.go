@@ -6,6 +6,8 @@ import (
 	"github.com/felipersas/payflow/internal/transfer/domain/entities"
 )
 
+//go:generate mockgen -source=transfer_repository.go -destination=mock_transfer_repository.go -package=repositories
+
 // TransferRepository é o contrato (porta) do DDD para transferências.
 // A camada de domínio define a interface; a infraestrutura implementa.
 type TransferRepository interface {

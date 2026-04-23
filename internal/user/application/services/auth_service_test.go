@@ -9,211 +9,145 @@ import (
 
 	"github.com/felipersas/payflow/internal/user/application/commands"
 	"github.com/felipersas/payflow/internal/user/domain/entities"
+	"github.com/felipersas/payflow/internal/user/domain/repositories"
 	"github.com/felipersas/payflow/pkg/auth"
+	gomock "go.uber.org/mock/gomock"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-type mockUserRepo struct {
-	usersByEmail map[string]*entities.User
-	usersByID    map[string]*entities.User
-}
-
-func newMockUserRepo() *mockUserRepo {
-	return &mockUserRepo{
-		usersByEmail: make(map[string]*entities.User),
-		usersByID:    make(map[string]*entities.User),
-	}
-}
-
-func (m *mockUserRepo) Create(_ context.Context, user *entities.User) error {
-	m.usersByEmail[user.Email] = user
-	m.usersByID[user.ID] = user
-	return nil
-}
-
-func (m *mockUserRepo) GetByEmail(_ context.Context, email string) (*entities.User, error) {
-	u, ok := m.usersByEmail[email]
-	if !ok {
-		return nil, fmt.Errorf("not found")
-	}
-	return u, nil
-}
-
-func (m *mockUserRepo) GetByID(_ context.Context, id string) (*entities.User, error) {
-	u, ok := m.usersByID[id]
-	if !ok {
-		return nil, fmt.Errorf("not found")
-	}
-	return u, nil
-}
-
-func setupService() (*AuthService, *mockUserRepo) {
-	repo := newMockUserRepo()
+func setupService(t *testing.T) (*AuthService, *repositories.MockUserRepository) {
+	ctrl := gomock.NewController(t)
+	mockRepo := repositories.NewMockUserRepository(ctrl)
 	jwtSecret := "test-secret-key-at-least-32b"
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return NewAuthService(repo, jwtSecret, logger), repo
+	return NewAuthService(mockRepo, jwtSecret, logger), mockRepo
 }
 
 func TestRegister_Valid(t *testing.T) {
-	svc, _ := setupService()
+	svc, mockRepo := setupService(t)
+
+	mockRepo.EXPECT().GetByEmail(gomock.Any(), "test@test.com").Return(nil, nil)
+	mockRepo.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
 
 	result, err := svc.Register(context.Background(), commands.RegisterCommand{
 		Email:    "test@test.com",
 		Password: "password123",
 	})
-	if err != nil {
-		t.Fatalf("Register() error = %v", err)
-	}
-	if result.Token == "" {
-		t.Error("Token should not be empty")
-	}
-	if result.User == nil {
-		t.Fatal("User should not be nil")
-	}
-	if result.User.ID == "" {
-		t.Error("User ID should not be empty")
-	}
-	if result.User.Email != "test@test.com" {
-		t.Errorf("User Email = %q, want %q", result.User.Email, "test@test.com")
-	}
+	require.NoError(t, err)
+	assert.NotEmpty(t, result.Token)
+	require.NotNil(t, result.User)
+	assert.NotEmpty(t, result.User.ID)
+	assert.Equal(t, "test@test.com", result.User.Email)
 }
 
 func TestRegister_DuplicateEmail(t *testing.T) {
-	svc, _ := setupService()
+	svc, mockRepo := setupService(t)
 
-	_, _ = svc.Register(context.Background(), commands.RegisterCommand{
-		Email:    "test@test.com",
-		Password: "password123",
-	})
+	existingUser, _ := entities.NewUser("test@test.com", "$2a$10$hash")
+	mockRepo.EXPECT().GetByEmail(gomock.Any(), "test@test.com").Return(existingUser, nil)
 
 	_, err := svc.Register(context.Background(), commands.RegisterCommand{
 		Email:    "test@test.com",
 		Password: "otherpass456",
 	})
-	if err == nil {
-		t.Error("expected error for duplicate email")
-	}
-	if err != nil && err.Error() != "email already registered" {
-		t.Errorf("error = %q, want %q", err.Error(), "email already registered")
-	}
+	require.Error(t, err)
+	assert.Equal(t, "email already registered", err.Error())
 }
 
 func TestRegister_EmptyEmail(t *testing.T) {
-	svc, _ := setupService()
+	svc, _ := setupService(t)
 
 	_, err := svc.Register(context.Background(), commands.RegisterCommand{
 		Email:    "",
 		Password: "password123",
 	})
-	if err == nil {
-		t.Error("expected error for empty email")
-	}
+	require.Error(t, err)
 }
 
 func TestRegister_EmptyPassword(t *testing.T) {
-	svc, _ := setupService()
+	svc, _ := setupService(t)
 
 	_, err := svc.Register(context.Background(), commands.RegisterCommand{
 		Email:    "test@test.com",
 		Password: "",
 	})
-	if err == nil {
-		t.Error("expected error for empty password")
-	}
+	require.Error(t, err)
 }
 
 func TestRegister_ShortPassword(t *testing.T) {
-	svc, _ := setupService()
+	svc, _ := setupService(t)
 
 	_, err := svc.Register(context.Background(), commands.RegisterCommand{
 		Email:    "test@test.com",
 		Password: "12345",
 	})
-	if err == nil {
-		t.Error("expected error for short password")
-	}
-	if err != nil && err.Error() != "password must be at least 6 characters" {
-		t.Errorf("error = %q, want %q", err.Error(), "password must be at least 6 characters")
-	}
+	require.Error(t, err)
+	assert.Equal(t, "password must be at least 6 characters", err.Error())
 }
 
 func TestLogin_Valid(t *testing.T) {
-	svc, _ := setupService()
+	svc, mockRepo := setupService(t)
 
-	_, _ = svc.Register(context.Background(), commands.RegisterCommand{
-		Email:    "test@test.com",
-		Password: "password123",
-	})
+	// bcrypt hash of "password123" - generated with bcrypt.DefaultCost
+	hashedPassword := "$2a$10$fsW1ppYmnRPpl1TJQnL.DOx1SvmCsAJtSVZBIbOJ8EwL4M/PW4kFm"
+	user, _ := entities.NewUser("test@test.com", hashedPassword)
+	mockRepo.EXPECT().GetByEmail(gomock.Any(), "test@test.com").Return(user, nil)
 
 	result, err := svc.Login(context.Background(), commands.LoginCommand{
 		Email:    "test@test.com",
 		Password: "password123",
 	})
-	if err != nil {
-		t.Fatalf("Login() error = %v", err)
-	}
-	if result.Token == "" {
-		t.Error("Token should not be empty")
-	}
-	if result.User == nil {
-		t.Fatal("User should not be nil")
-	}
-	if result.User.Email != "test@test.com" {
-		t.Errorf("User Email = %q, want %q", result.User.Email, "test@test.com")
-	}
+	require.NoError(t, err)
+	assert.NotEmpty(t, result.Token)
+	require.NotNil(t, result.User)
+	assert.Equal(t, "test@test.com", result.User.Email)
 }
 
 func TestLogin_WrongPassword(t *testing.T) {
-	svc, _ := setupService()
+	svc, mockRepo := setupService(t)
 
-	_, _ = svc.Register(context.Background(), commands.RegisterCommand{
-		Email:    "test@test.com",
-		Password: "password123",
-	})
+	// Create a user with a pre-hashed password for "correctpassword"
+	// $2a$10$... is bcrypt hash for "correctpassword"
+	hashedPassword := "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy"
+	user, _ := entities.NewUser("test@test.com", hashedPassword)
+	mockRepo.EXPECT().GetByEmail(gomock.Any(), "test@test.com").Return(user, nil)
 
 	_, err := svc.Login(context.Background(), commands.LoginCommand{
 		Email:    "test@test.com",
 		Password: "wrongpassword",
 	})
-	if err == nil {
-		t.Error("expected error for wrong password")
-	}
-	if err != nil && err.Error() != "invalid credentials" {
-		t.Errorf("error = %q, want %q", err.Error(), "invalid credentials")
-	}
+	require.Error(t, err)
+	assert.Equal(t, "invalid credentials", err.Error())
 }
 
 func TestLogin_NonexistentEmail(t *testing.T) {
-	svc, _ := setupService()
+	svc, mockRepo := setupService(t)
+
+	mockRepo.EXPECT().GetByEmail(gomock.Any(), "nonexistent@test.com").Return(nil, fmt.Errorf("not found"))
 
 	_, err := svc.Login(context.Background(), commands.LoginCommand{
 		Email:    "nonexistent@test.com",
 		Password: "password123",
 	})
-	if err == nil {
-		t.Error("expected error for nonexistent email")
-	}
-	if err != nil && err.Error() != "invalid credentials" {
-		t.Errorf("error = %q, want %q", err.Error(), "invalid credentials")
-	}
+	require.Error(t, err)
+	assert.Equal(t, "invalid credentials", err.Error())
 }
 
 func TestRegister_TokenRoundTrip(t *testing.T) {
-	svc, _ := setupService()
+	svc, mockRepo := setupService(t)
 	jwtSecret := "test-secret-key-at-least-32b"
+
+	mockRepo.EXPECT().GetByEmail(gomock.Any(), "test@test.com").Return(nil, nil)
+	mockRepo.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
 
 	result, err := svc.Register(context.Background(), commands.RegisterCommand{
 		Email:    "test@test.com",
 		Password: "password123",
 	})
-	if err != nil {
-		t.Fatalf("Register() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	claims, err := auth.ValidateToken(jwtSecret, result.Token)
-	if err != nil {
-		t.Fatalf("ValidateToken() error = %v", err)
-	}
-	if claims.UserID != result.User.ID {
-		t.Errorf("UserID in token = %q, want %q", claims.UserID, result.User.ID)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, result.User.ID, claims.UserID)
 }

@@ -3,6 +3,9 @@ package entities
 import (
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewUser(t *testing.T) {
@@ -39,29 +42,15 @@ func TestNewUser(t *testing.T) {
 			after := time.Now().UTC()
 
 			if tt.wantErr {
-				if err == nil {
-					t.Error("expected error, got nil")
-				}
+				assert.Error(t, err, "expected error")
 				return
 			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if user.ID == "" {
-				t.Error("ID should not be empty")
-			}
-			if user.Email != tt.email {
-				t.Errorf("Email = %q, want %q", user.Email, tt.email)
-			}
-			if user.PasswordHash != tt.passwordHash {
-				t.Errorf("PasswordHash = %q, want %q", user.PasswordHash, tt.passwordHash)
-			}
-			if user.CreatedAt.Before(before) || user.CreatedAt.After(after) {
-				t.Error("CreatedAt should be close to now")
-			}
-			if user.UpdatedAt.Before(before) || user.UpdatedAt.After(after) {
-				t.Error("UpdatedAt should be close to now")
-			}
+			require.NoError(t, err, "unexpected error")
+			assert.NotEmpty(t, user.ID)
+			assert.Equal(t, tt.email, user.Email)
+			assert.Equal(t, tt.passwordHash, user.PasswordHash)
+			assert.True(t, user.CreatedAt.After(before) || user.CreatedAt.Before(after), "CreatedAt should be close to now")
+			assert.True(t, user.UpdatedAt.After(before) || user.UpdatedAt.Before(after), "UpdatedAt should be close to now")
 		})
 	}
 }
@@ -69,7 +58,5 @@ func TestNewUser(t *testing.T) {
 func TestUser_TimestampsEqualInitially(t *testing.T) {
 	user, _ := NewUser("test@test.com", "$2a$10$abc")
 
-	if user.CreatedAt != user.UpdatedAt {
-		t.Error("CreatedAt and UpdatedAt should be equal initially")
-	}
+	assert.Equal(t, user.CreatedAt, user.UpdatedAt, "CreatedAt and UpdatedAt should be equal initially")
 }

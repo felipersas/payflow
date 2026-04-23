@@ -6,6 +6,8 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestGenerateAndValidateToken(t *testing.T) {
@@ -13,20 +15,12 @@ func TestGenerateAndValidateToken(t *testing.T) {
 	userID := uuid.Must(uuid.NewV7()).String()
 
 	token, err := GenerateToken(secret, userID)
-	if err != nil {
-		t.Fatalf("GenerateToken failed: %v", err)
-	}
-	if token == "" {
-		t.Fatal("token is empty")
-	}
+	require.NoError(t, err, "GenerateToken failed")
+	assert.NotEmpty(t, token, "token is empty")
 
 	claims, err := ValidateToken(secret, token)
-	if err != nil {
-		t.Fatalf("ValidateToken failed: %v", err)
-	}
-	if claims.UserID != userID {
-		t.Errorf("UserID mismatch: got %s, want %s", claims.UserID, userID)
-	}
+	require.NoError(t, err, "ValidateToken failed")
+	assert.Equal(t, userID, claims.UserID, "UserID mismatch")
 }
 
 func TestValidateToken_WrongSecret(t *testing.T) {
@@ -35,23 +29,17 @@ func TestValidateToken_WrongSecret(t *testing.T) {
 	userID := uuid.Must(uuid.NewV7()).String()
 
 	token, err := GenerateToken(secretA, userID)
-	if err != nil {
-		t.Fatalf("GenerateToken failed: %v", err)
-	}
+	require.NoError(t, err, "GenerateToken failed")
 
 	_, err = ValidateToken(secretB, token)
-	if err == nil {
-		t.Error("expected error when validating with wrong secret, got nil")
-	}
+	assert.Error(t, err, "expected error when validating with wrong secret, got nil")
 }
 
 func TestValidateToken_MalformedToken(t *testing.T) {
 	secret := "test-secret"
 
 	_, err := ValidateToken(secret, "not-a-token")
-	if err == nil {
-		t.Error("expected error for malformed token, got nil")
-	}
+	assert.Error(t, err, "expected error for malformed token, got nil")
 }
 
 func TestValidateToken_ExpiredToken(t *testing.T) {
@@ -71,12 +59,8 @@ func TestValidateToken_ExpiredToken(t *testing.T) {
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	tokenString, err := token.SignedString([]byte(secret))
-	if err != nil {
-		t.Fatalf("failed to create expired token: %v", err)
-	}
+	require.NoError(t, err, "failed to create expired token")
 
 	_, err = ValidateToken(secret, tokenString)
-	if err == nil {
-		t.Error("expected error for expired token, got nil")
-	}
+	assert.Error(t, err, "expected error for expired token, got nil")
 }
