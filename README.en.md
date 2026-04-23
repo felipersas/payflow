@@ -13,6 +13,7 @@
 - [Prerequisites](#prerequisites)
 - [Getting Started](#getting-started)
 - [API Reference](#api-reference)
+- [API Documentation](#api-documentation)
 - [Project Structure](#project-structure)
 - [Testing](#testing)
 - [Observability](#observability)
@@ -47,47 +48,94 @@ The project applies Domain-Driven Design (DDD) with strict layer separation per 
 
 ### Service Topology
 
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│                          Caddy Gateway (:80)                         │
-│                 /auth/*  /accounts/*  /transfers/*                   │
-└──────────┬──────────────┬──────────────────┬────────────────────────┘
-           │              │                  │
-           ▼              ▼                  ▼
-┌──────────────┐  ┌───────────────┐  ┌────────────────┐
-│  User Service │  │Account Service│  │Transfer Service│
-│   (:8082)     │  │   (:8080)     │  │   (:8081)      │
-│               │  │               │  │                │
-│ payflow_users │  │payflow_accounts│ │payflow_transfers│
-└──────────────┘  └───────┬───────┘  └───────┬────────┘
-                          │                  │
-                          │    RabbitMQ      │
-                          └──────────────────┘
-                          account.debit.cmd
-                          account.credit.cmd
-                          account.compensate.cmd
+```mermaid
+graph TB
+    Client["Client"]
+    Gateway["Caddy Gateway<br/>:80"]
+
+    Client --> Gateway
+
+    Gateway -->|"/auth/*"| User["User Service<br/>:8082<br/>payflow_users"]
+    Gateway -->|"/accounts/*"| Account["Account Service<br/>:8080<br/>payflow_accounts"]
+    Gateway -->|"/transfers/*"| Transfer["Transfer Service<br/>:8081<br/>payflow_transfers"]
+
+    Account <-->|"account.debit.cmd<br/>account.credit.cmd<br/>account.compensate.cmd"| RabbitMQ["RabbitMQ"]
+    Transfer <-->|"account.debit.cmd<br/>account.credit.cmd<br/>account.compensate.cmd"| RabbitMQ
 ```
 
 ### Transfer Saga Flow
 
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Transfer as Transfer Service
+    participant RabbitMQ
+    participant Account as Account Service
+
+    Client->>Transfer: POST /transfers
+    Transfer->>Transfer: Creates pending transfer
+    Transfer->>RabbitMQ: publishes "account.debit.cmd"
+    RabbitMQ->>Account: consumes "account.debit.cmd"
+    Account->>Account: Debits source account
+    Account->>RabbitMQ: publishes "account.debited"
+    RabbitMQ->>Transfer: consumes "account.debited"
+    Transfer->>RabbitMQ: publishes "account.credit.cmd"
+    RabbitMQ->>Account: consumes "account.credit.cmd"
+    Account->>Account: Credits destination account
+    Account->>RabbitMQ: publishes "account.credited"
+    RabbitMQ->>Transfer: consumes "account.credited"
+    Transfer->>Transfer: Marks transfer as completed
 ```
-1. POST /transfers → Transfer creates pending record → publishes "account.debit.cmd"
-2. Account debits → publishes "account.debited" → Transfer processes → publishes "account.credit.cmd"
-3. Account credits → publishes "account.credited" → Transfer marks as completed
-4. Failure at any step → compensation (reversal) → Transfer marks as failed
+
+### Compensation (on failure)
+
+```mermaid
+sequenceDiagram
+    participant Transfer as Transfer Service
+    participant RabbitMQ
+    participant Account as Account Service
+
+    Note over Transfer: Failure on debit or credit
+    Transfer->>Transfer: Marks transfer as failed
+    Transfer->>RabbitMQ: publishes "account.compensate.cmd"
+    RabbitMQ->>Account: consumes "account.compensate.cmd"
+    Account->>Account: Reverses debit (compensation)
+    Account->>RabbitMQ: publishes "account.compensated"
+    RabbitMQ->>Transfer: consumes "account.compensated"
+    Transfer->>Transfer: Publishes "transfer.failed"
 ```
 
 ### DDD Layers (per service)
 
-```
-domain/entities/        Aggregate roots with business rules and domain events
-domain/repositories/    Interfaces (contracts)
-application/commands/   Commands (write side)
-application/queries/    Query result DTOs (read side)
-application/services/   Orchestration, depends on repository + messaging
-interfaces/http/        Chi handlers, thin HTTP adapters
-interfaces/messaging/   RabbitMQ consumers calling application services
-infrastructure/postgres/Repository implementations + embedded SQL migrations
+```mermaid
+graph TD
+    subgraph Interfaces
+        HTTP["interfaces/http/<br/>Chi Handlers"]
+        MSG["interfaces/messaging/<br/>RabbitMQ Consumers"]
+    end
+
+    subgraph Application
+        SVC["application/services/<br/>Orchestration"]
+        CMD["application/commands/<br/>Commands (write)"]
+        QRY["application/queries/<br/>Queries & DTOs (read)"]
+    end
+
+    subgraph Domain
+        ENT["domain/entities/<br/>Aggregates & Events"]
+        REPO["domain/repositories/<br/>Interfaces"]
+    end
+
+    subgraph Infrastructure
+        PG["infrastructure/postgres/<br/>Repository + Migrations"]
+    end
+
+    HTTP --> SVC
+    MSG --> SVC
+    SVC --> ENT
+    SVC --> REPO
+    SVC --> CMD
+    SVC --> QRY
+    REPO -.->|implements| PG
 ```
 
 ---
@@ -196,8 +244,8 @@ Query parameters for listing: `account_id`, `cursor`, `limit`.
 |---|---|---|
 | `GET` | `/health` | Service health check |
 | `GET` | `/metrics` | Prometheus metrics |
-| `GET` | `/docs` | Interactive OpenAPI documentation |
-| `GET` | `/openapi.json` | OpenAPI 3.0 specification |
+| `GET` | `/docs` | Interactive documentation (Scalar) |
+| `GET` | `/openapi.json` | OpenAPI 3.0 specification (JSON) |
 
 ### Example Flow
 
@@ -228,6 +276,14 @@ curl -X POST http://localhost:80/transfers \
 ```
 
 An Insomnia API collection is available at [`insomnia-collection.json`](insomnia-collection.json).
+
+---
+
+## API Documentation
+
+Each service has its own OpenAPI 3.0 specification (`openapi.yaml`) with request/response schemas and examples. Shared components (error schemas, pagination) are defined in `pkg/openapi/shared.yaml` and automatically merged at compile time.
+
+The interactive UI is rendered by **[Scalar](https://github.com/scalar/scalar)** at `/docs`, allowing you to explore and test endpoints directly in the browser. The raw spec is available at `/openapi.json`.
 
 ---
 

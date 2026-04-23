@@ -15,6 +15,7 @@
 - [Pré-requisitos](#pré-requisitos)
 - [Executando o Projeto](#executando-o-projeto)
 - [Referência da API](#referência-da-api)
+- [Documentação da API](#documentação-da-api)
 - [Estrutura do Projeto](#estrutura-do-projeto)
 - [Testes](#testes)
 - [Observabilidade](#observabilidade)
@@ -49,47 +50,94 @@ O projeto aplica Domain-Driven Design (DDD) com separação rigorosa de camadas 
 
 ### Topologia dos Serviços
 
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│                          Caddy Gateway (:80)                         │
-│                 /auth/*  /accounts/*  /transfers/*                   │
-└──────────┬──────────────┬──────────────────┬────────────────────────┘
-           │              │                  │
-           ▼              ▼                  ▼
-┌──────────────┐  ┌───────────────┐  ┌────────────────┐
-│  User Service │  │Account Service│  │Transfer Service│
-│   (:8082)     │  │   (:8080)     │  │   (:8081)      │
-│               │  │               │  │                │
-│ payflow_users │  │payflow_accounts│ │payflow_transfers│
-└──────────────┘  └───────┬───────┘  └───────┬────────┘
-                          │                  │
-                          │    RabbitMQ      │
-                          └──────────────────┘
-                          account.debit.cmd
-                          account.credit.cmd
-                          account.compensate.cmd
+```mermaid
+graph TB
+    Client["Cliente"]
+    Gateway["Caddy Gateway<br/>:80"]
+
+    Client --> Gateway
+
+    Gateway -->|"/auth/*"| User["User Service<br/>:8082<br/>payflow_users"]
+    Gateway -->|"/accounts/*"| Account["Account Service<br/>:8080<br/>payflow_accounts"]
+    Gateway -->|"/transfers/*"| Transfer["Transfer Service<br/>:8081<br/>payflow_transfers"]
+
+    Account <-->|"account.debit.cmd<br/>account.credit.cmd<br/>account.compensate.cmd"| RabbitMQ["RabbitMQ"]
+    Transfer <-->|"account.debit.cmd<br/>account.credit.cmd<br/>account.compensate.cmd"| RabbitMQ
 ```
 
 ### Fluxo da Saga de Transferência
 
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Transfer as Transfer Service
+    participant RabbitMQ
+    participant Account as Account Service
+
+    Client->>Transfer: POST /transfers
+    Transfer->>Transfer: Cria transferência pendente
+    Transfer->>RabbitMQ: publica "account.debit.cmd"
+    RabbitMQ->>Account: consome "account.debit.cmd"
+    Account->>Account: Debita conta de origem
+    Account->>RabbitMQ: publica "account.debited"
+    RabbitMQ->>Transfer: consome "account.debited"
+    Transfer->>RabbitMQ: publica "account.credit.cmd"
+    RabbitMQ->>Account: consome "account.credit.cmd"
+    Account->>Account: Credita conta de destino
+    Account->>RabbitMQ: publica "account.credited"
+    RabbitMQ->>Transfer: consome "account.credited"
+    Transfer->>Transfer: Marca transferência como concluída
 ```
-1. POST /transfers → Transfer cria registro pendente → publica "account.debit.cmd"
-2. Account debita → publica "account.debited" → Transfer processa → publica "account.credit.cmd"
-3. Account credita → publica "account.credited" → Transfer marca como concluída
-4. Falha em qualquer etapa → compensação (estorno) → Transfer marca como falha
+
+### Compensação (em caso de falha)
+
+```mermaid
+sequenceDiagram
+    participant Transfer as Transfer Service
+    participant RabbitMQ
+    participant Account as Account Service
+
+    Note over Transfer: Falha em débito ou crédito
+    Transfer->>Transfer: Marca transferência como falha
+    Transfer->>RabbitMQ: publica "account.compensate.cmd"
+    RabbitMQ->>Account: consome "account.compensate.cmd"
+    Account->>Account: Estorna débito (compensação)
+    Account->>RabbitMQ: publica "account.compensated"
+    RabbitMQ->>Transfer: consome "account.compensated"
+    Transfer->>Transfer: Publica "transfer.failed"
 ```
 
 ### Camadas DDD (por serviço)
 
-```
-domain/entities/        Raízes de agregação com regras de negócio e eventos de domínio
-domain/repositories/    Interfaces (contratos)
-application/commands/   Commands (escrita)
-application/queries/    Queries e DTOs de resposta (leitura)
-application/services/   Orquestração, depende de repositório + mensageria
-interfaces/http/        Handlers Chi, adaptadores HTTP finos
-interfaces/messaging/   Consumers RabbitMQ que chamam serviços de aplicação
-infrastructure/postgres/Implementações de repositório + migrações SQL embutidas
+```mermaid
+graph TD
+    subgraph Interfaces
+        HTTP["interfaces/http/<br/>Handlers Chi"]
+        MSG["interfaces/messaging/<br/>Consumers RabbitMQ"]
+    end
+
+    subgraph Application
+        SVC["application/services/<br/>Orquestração"]
+        CMD["application/commands/<br/>Commands (escrita)"]
+        QRY["application/queries/<br/>Queries & DTOs (leitura)"]
+    end
+
+    subgraph Domain
+        ENT["domain/entities/<br/>Agregações & eventos"]
+        REPO["domain/repositories/<br/>Interfaces"]
+    end
+
+    subgraph Infrastructure
+        PG["infrastructure/postgres/<br/>Repositório + migrações"]
+    end
+
+    HTTP --> SVC
+    MSG --> SVC
+    SVC --> ENT
+    SVC --> REPO
+    SVC --> CMD
+    SVC --> QRY
+    REPO -.->|implementa| PG
 ```
 
 ---
@@ -198,8 +246,8 @@ Parâmetros de consulta para listagem: `account_id`, `cursor`, `limit`.
 |---|---|---|
 | `GET` | `/health` | Health check do serviço |
 | `GET` | `/metrics` | Métricas Prometheus |
-| `GET` | `/docs` | Documentação OpenAPI interativa |
-| `GET` | `/openapi.json` | Especificação OpenAPI 3.0 |
+| `GET` | `/docs` | Documentação interativa (Scalar) |
+| `GET` | `/openapi.json` | Especificação OpenAPI 3.0 (JSON) |
 
 ### Exemplo de Fluxo Completo
 
@@ -230,6 +278,14 @@ curl -X POST http://localhost:80/transfers \
 ```
 
 Uma collection do Insomnia está disponível em [`insomnia-collection.json`](insomnia-collection.json).
+
+---
+
+## Documentação da API
+
+Cada serviço possui sua própria especificação OpenAPI 3.0 (`openapi.yaml`) com schemas de request/response e exemplos. Componentes compartilhados (schemas de erro, paginação) são definidos em `pkg/openapi/shared.yaml` e mesclados automaticamente em tempo de compilação.
+
+A interface interativa é renderizada pelo **[Scalar](https://github.com/scalar/scalar)** em `/docs`, permitindo explorar e testar os endpoints diretamente no navegador. A spec bruta está disponível em `/openapi.json`.
 
 ---
 
