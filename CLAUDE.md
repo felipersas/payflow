@@ -121,5 +121,6 @@ Tests use **testify** (`assert`/`require`) for assertions and **gomock** (`go.ub
 | RabbitMQ | 5672 / 15672 (mgmt) | payflow / payflow123 |
 | Jaeger | 16686 (UI) / 4317 (OTLP) | — |
 | Prometheus | 9090 | — |
+| Grafana | 3000 | admin / payflow123 |
 
 API collection available in `insomnia-collection.json`.
