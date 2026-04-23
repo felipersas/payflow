@@ -114,7 +114,12 @@ func main() {
 	r.Use(middleware.Recovery(logger))
 	r.Use(middleware.Metrics)
 
-	r.Route("/transfers", transferHandler.Routes)
+	// Rotas protegidas (com auth)
+	r.Route("/transfers", func(r chi.Router) {
+		r.Use(middleware.Auth(cfg.JWTSecret))
+		transferHandler.Routes(r)
+	})
+
 	r.Get("/health", healthChecker.Handler())
 	r.Handle("/metrics", promhttp.Handler())
 

@@ -8,6 +8,7 @@ import (
 	"github.com/felipersas/payflow/internal/account/application/commands"
 	"github.com/felipersas/payflow/internal/account/application/queries"
 	"github.com/felipersas/payflow/internal/account/application/services"
+	"github.com/felipersas/payflow/pkg/middleware"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -30,7 +31,6 @@ func (h *AccountHandler) Routes(r chi.Router) {
 }
 
 type createAccountRequest struct {
-	UserID   string `json:"user_id"`
 	Currency string `json:"currency"`
 }
 
@@ -42,7 +42,19 @@ type accountResponse struct {
 	IsActive bool   `json:"is_active"`
 }
 
+// verifyOwnership garante que a conta pertence ao usuário autenticado.
+func (h *AccountHandler) verifyOwnership(w http.ResponseWriter, r *http.Request, accountID string) bool {
+	userID := middleware.GetUserID(r.Context())
+	if err := h.service.VerifyAccountOwner(r.Context(), accountID, userID); err != nil {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
+		return false
+	}
+	return true
+}
+
 func (h *AccountHandler) CreateAccount(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+
 	var req createAccountRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
@@ -50,7 +62,7 @@ func (h *AccountHandler) CreateAccount(w http.ResponseWriter, r *http.Request) {
 	}
 
 	account, err := h.service.CreateAccount(r.Context(), commands.CreateAccountCommand{
-		UserID:   req.UserID,
+		UserID:   userID,
 		Currency: req.Currency,
 	})
 	if err != nil {
@@ -74,6 +86,10 @@ func (h *AccountHandler) GetBalance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !h.verifyOwnership(w, r, accountID) {
+		return
+	}
+
 	result, err := h.service.GetBalance(r.Context(), queries.GetBalanceQuery{
 		AccountID: accountID,
 	})
@@ -94,6 +110,10 @@ func (h *AccountHandler) CreditAccount(w http.ResponseWriter, r *http.Request) {
 	accountID := chi.URLParam(r, "id")
 	if accountID == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "account id is required"})
+		return
+	}
+
+	if !h.verifyOwnership(w, r, accountID) {
 		return
 	}
 
@@ -130,6 +150,10 @@ func (h *AccountHandler) DebitAccount(w http.ResponseWriter, r *http.Request) {
 	accountID := chi.URLParam(r, "id")
 	if accountID == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "account id is required"})
+		return
+	}
+
+	if !h.verifyOwnership(w, r, accountID) {
 		return
 	}
 

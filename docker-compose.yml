@@ -98,6 +98,7 @@ services:
       SERVICE_PORT: "8080"
       SERVICE_NAME: account-service
       OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4317
+      JWT_SECRET: payflow-jwt-secret-2026
     ports:
       - "8080:8080"
     depends_on:
@@ -124,6 +125,7 @@ services:
       SERVICE_PORT: "8081"
       SERVICE_NAME: transfer-service
       OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4317
+      JWT_SECRET: payflow-jwt-secret-2026
     ports:
       - "8081:8081"
     depends_on:

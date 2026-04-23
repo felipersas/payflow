@@ -140,6 +140,18 @@ func (s *AccountService) CreditAccount(ctx context.Context, cmd commands.CreditA
 	return account, nil
 }
 
+// VerifyAccountOwner verifica se a conta pertence ao usuário autenticado.
+func (s *AccountService) VerifyAccountOwner(ctx context.Context, accountID, userID string) error {
+	account, err := s.repo.GetByID(ctx, accountID)
+	if err != nil {
+		return err
+	}
+	if account.UserID != userID {
+		return fmt.Errorf("account does not belong to authenticated user")
+	}
+	return nil
+}
+
 // GetBalance retorna o saldo atual da conta.
 func (s *AccountService) GetBalance(ctx context.Context, query queries.GetBalanceQuery) (*queries.BalanceResult, error) {
 	account, err := s.repo.GetByID(ctx, query.AccountID)

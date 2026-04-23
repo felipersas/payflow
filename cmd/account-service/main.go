@@ -89,7 +89,8 @@ func main() {
 	defer consumer.Close()
 
 	// 5. Composition Root (DDD: monta o grafo de dependências)
-	repo := postgres.NewAccountRepository(pool)
+	accountRepo := postgres.NewAccountRepository(pool)
+	userRepo := postgres.NewUserRepository(pool)
 
 	if err := migrate.Run(cfg.DatabaseURL, postgres.Migrations, "migrations"); err != nil {
 		logger.Error("running migrations", "error", err)
@@ -97,8 +98,10 @@ func main() {
 	}
 	logger.Info("migrations applied")
 
-	accountService := services.NewAccountService(repo, resilientPub, logger)
+	accountService := services.NewAccountService(accountRepo, resilientPub, logger)
+	authService := services.NewAuthService(userRepo, cfg.JWTSecret, logger)
 	accountHandler := accHttp.NewAccountHandler(accountService)
+	authHandler := accHttp.NewAuthHandler(authService)
 	accountConsumer := accMessaging.NewAccountConsumer(accountService, consumer, resilientPub, logger)
 
 	// 6. Health checks
@@ -114,7 +117,15 @@ func main() {
 	r.Use(middleware.Recovery(logger))
 	r.Use(middleware.Metrics)
 
-	r.Route("/accounts", accountHandler.Routes)
+	// Rotas públicas (sem auth)
+	r.Route("/auth", authHandler.Routes)
+
+	// Rotas protegidas (com auth)
+	r.Route("/accounts", func(r chi.Router) {
+		r.Use(middleware.Auth(cfg.JWTSecret))
+		accountHandler.Routes(r)
+	})
+
 	r.Get("/health", healthChecker.Handler())
 	r.Handle("/metrics", promhttp.Handler())
 
