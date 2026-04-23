@@ -104,14 +104,29 @@ func (a *App) MustRun() {
 }
 
 // Run inicializa toda a infraestrutura e inicia o HTTP server.
-// Ordem: Logger → Tracer → DB → RabbitMQ → Router → Consumers → Server.
+// Ordem: Validate → Logger → Tracer → DB → RabbitMQ → Router → Consumers → Server.
 func (a *App) Run() error {
-	// 1. Logger
+	if err := a.validate(); err != nil {
+		return err
+	}
+
+	// Logger
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(logger)
 
-	// 2. Tracer
-	ctx := context.Background()
+	// Context with cancel for consumer shutdown
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Cleanup slice for proper resource management in error paths
+	var cleanups []func()
+	defer func() {
+		for i := len(cleanups) - 1; i >= 0; i-- {
+			cleanups[i]()
+		}
+	}()
+
+	// Tracer
 	var shutdownTracer func(context.Context) error
 	if a.useTracer {
 		var err error
@@ -121,59 +136,25 @@ func (a *App) Run() error {
 		}
 	}
 
-	// 3. Database
-	var pool *pgxpool.Pool
-	if a.useDB {
-		poolConfig, err := pgxpool.ParseConfig(a.cfg.DatabaseURL)
-		if err != nil {
-			return fmt.Errorf("parsing database url: %w", err)
-		}
-		var dbErr error
-		pool, dbErr = pgxpool.NewWithConfig(ctx, poolConfig)
-		if dbErr != nil {
-			return fmt.Errorf("connecting to database: %w", dbErr)
-		}
-		defer pool.Close()
-
-		if err := pool.Ping(ctx); err != nil {
-			return fmt.Errorf("pinging database: %w", err)
-		}
-		logger.Info("database connected")
-
-		if err := migrate.Run(a.cfg.DatabaseURL, a.migrations, a.migrationsDir); err != nil {
-			return fmt.Errorf("running migrations: %w", err)
-		}
-		logger.Info("migrations applied")
+	// Database
+	pool, dbCleanup, err := a.initDB(ctx, logger)
+	if err != nil {
+		return err
+	}
+	if dbCleanup != nil {
+		cleanups = append(cleanups, dbCleanup)
 	}
 
-	// 4. RabbitMQ
-	var rabbitConn *amqp.Connection
-	var publisher messaging.MessagePublisher
-	var consumer *messaging.Consumer
-	if a.useRabbit {
-		var err error
-		rabbitConn, err = connectRabbitMQ(a.cfg.RabbitMQURL, logger)
-		if err != nil {
-			return fmt.Errorf("connecting to rabbitmq: %w", err)
-		}
-		defer rabbitConn.Close()
-
-		pub, err := messaging.NewPublisher(rabbitConn, logger)
-		if err != nil {
-			return fmt.Errorf("creating publisher: %w", err)
-		}
-		defer pub.Close()
-
-		publisher = messaging.NewResilientPublisher(pub, logger)
-
-		consumer, err = messaging.NewConsumer(rabbitConn, logger)
-		if err != nil {
-			return fmt.Errorf("creating consumer: %w", err)
-		}
-		defer consumer.Close()
+	// RabbitMQ
+	rabbitConn, publisher, consumer, mqCleanup, err := a.initRabbitMQ(ctx, logger)
+	if err != nil {
+		return err
+	}
+	if mqCleanup != nil {
+		cleanups = append(cleanups, mqCleanup)
 	}
 
-	// 5. Deps
+	// Deps
 	deps := &Deps{
 		Config:     a.cfg,
 		Logger:     logger,
@@ -185,7 +166,7 @@ func (a *App) Run() error {
 		Ctx:        ctx,
 	}
 
-	// 6. Health checks
+	// Health checks
 	healthChecker := health.NewChecker()
 	if pool != nil {
 		healthChecker.AddCheck(health.DBCheck(pool))
@@ -194,29 +175,17 @@ func (a *App) Run() error {
 		healthChecker.AddCheck(health.RabbitMQCheck(rabbitConn))
 	}
 
-	// 7. Router
-	r := chi.NewRouter()
-	r.Use(otelhttp.NewMiddleware(a.name))
-	r.Use(middleware.CorrelationID)
-	r.Use(middleware.Logging(logger))
-	r.Use(middleware.Recovery(logger))
-	r.Use(middleware.Metrics)
+	// Router
+	r := a.initRouter(deps, healthChecker)
 
-	if a.onRoutes != nil {
-		a.onRoutes(r, deps)
-	}
-
-	r.Get("/health", healthChecker.Handler())
-	r.Handle("/metrics", promhttp.Handler())
-
-	// 8. Consumers
+	// Consumers
 	if a.onConsumers != nil {
 		if err := a.onConsumers(deps); err != nil {
 			return fmt.Errorf("starting consumers: %w", err)
 		}
 	}
 
-	// 9. HTTP Server + graceful shutdown
+	// HTTP Server + graceful shutdown
 	srv := &http.Server{
 		Addr:         ":" + a.cfg.ServicePort,
 		Handler:      r,
@@ -225,22 +194,29 @@ func (a *App) Run() error {
 		IdleTimeout:  60 * time.Second,
 	}
 
-	done := make(chan os.Signal, 1)
-	signal.Notify(done, os.Interrupt, syscall.SIGTERM)
-
+	serverErr := make(chan error, 1)
 	go func() {
 		logger.Info("starting server", "port", a.cfg.ServicePort)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Error("server error", "error", err)
-			os.Exit(1)
+			serverErr <- err
 		}
 	}()
 
-	<-done
-	logger.Info("shutting down...")
+	done := make(chan os.Signal, 1)
+	signal.Notify(done, os.Interrupt, syscall.SIGTERM)
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	select {
+	case err := <-serverErr:
+		return fmt.Errorf("server error: %w", err)
+	case sig := <-done:
+		logger.Info("shutting down...", "signal", sig)
+	}
+
+	// Signal consumers to stop
+	cancel()
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer shutdownCancel()
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		logger.Error("server shutdown error", "error", err)
@@ -256,11 +232,112 @@ func (a *App) Run() error {
 	return nil
 }
 
-func connectRabbitMQ(url string, logger *slog.Logger) (*amqp.Connection, error) {
+// validate checks that the configuration is consistent.
+func (a *App) validate() error {
+	if a.onConsumers != nil && !a.useRabbit {
+		return fmt.Errorf("consumers registered but RabbitMQ not enabled: call WithRabbitMQ()")
+	}
+	return nil
+}
+
+// initDB initializes the database connection and runs migrations.
+func (a *App) initDB(ctx context.Context, logger *slog.Logger) (*pgxpool.Pool, func(), error) {
+	if !a.useDB {
+		return nil, func() {}, nil
+	}
+
+	poolConfig, err := pgxpool.ParseConfig(a.cfg.DatabaseURL)
+	if err != nil {
+		return nil, nil, fmt.Errorf("parsing database url: %w", err)
+	}
+
+	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
+	if err != nil {
+		return nil, nil, fmt.Errorf("connecting to database: %w", err)
+	}
+
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
+		return nil, nil, fmt.Errorf("pinging database: %w", err)
+	}
+	logger.Info("database connected")
+
+	if err := migrate.Run(a.cfg.DatabaseURL, a.migrations, a.migrationsDir); err != nil {
+		pool.Close()
+		return nil, nil, fmt.Errorf("running migrations: %w", err)
+	}
+	logger.Info("migrations applied")
+
+	cleanup := func() { pool.Close() }
+	return pool, cleanup, nil
+}
+
+// initRabbitMQ initializes RabbitMQ connection, publisher, and consumer.
+func (a *App) initRabbitMQ(ctx context.Context, logger *slog.Logger) (*amqp.Connection, messaging.MessagePublisher, *messaging.Consumer, func(), error) {
+	if !a.useRabbit {
+		return nil, nil, nil, func() {}, nil
+	}
+
+	rabbitConn, err := connectRabbitMQ(ctx, a.cfg.RabbitMQURL, logger)
+	if err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("connecting to rabbitmq: %w", err)
+	}
+
+	pub, err := messaging.NewPublisher(rabbitConn, logger)
+	if err != nil {
+		rabbitConn.Close()
+		return nil, nil, nil, nil, fmt.Errorf("creating publisher: %w", err)
+	}
+
+	publisher := messaging.NewResilientPublisher(pub, logger)
+
+	consumer, err := messaging.NewConsumer(rabbitConn, logger)
+	if err != nil {
+		pub.Close()
+		rabbitConn.Close()
+		return nil, nil, nil, nil, fmt.Errorf("creating consumer: %w", err)
+	}
+
+	cleanup := func() {
+		consumer.Close()
+		pub.Close()
+		rabbitConn.Close()
+	}
+
+	return rabbitConn, publisher, consumer, cleanup, nil
+}
+
+// initRouter initializes the HTTP router with middleware and routes.
+func (a *App) initRouter(deps *Deps, healthChecker *health.Checker) *chi.Mux {
+	r := chi.NewRouter()
+	r.Use(otelhttp.NewMiddleware(a.name))
+	r.Use(middleware.CorrelationID)
+	r.Use(middleware.Logging(deps.Logger))
+	r.Use(middleware.Recovery(deps.Logger))
+	r.Use(middleware.Metrics)
+
+	if a.onRoutes != nil {
+		a.onRoutes(r, deps)
+	}
+
+	r.Get("/health", healthChecker.Handler())
+	r.Handle("/metrics", promhttp.Handler())
+
+	return r
+}
+
+// connectRabbitMQ attempts to connect to RabbitMQ with retries.
+func connectRabbitMQ(ctx context.Context, url string, logger *slog.Logger) (*amqp.Connection, error) {
 	var conn *amqp.Connection
 	var err error
 
 	for i := 0; i < 10; i++ {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
 		conn, err = amqp.Dial(url)
 		if err == nil {
 			logger.Info("rabbitmq connected")
