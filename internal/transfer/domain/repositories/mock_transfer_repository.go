@@ -14,6 +14,7 @@ import (
 	reflect "reflect"
 
 	entities "github.com/felipersas/payflow/internal/transfer/domain/entities"
+	pagination "github.com/felipersas/payflow/pkg/pagination"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -83,6 +84,21 @@ func (m *MockTransferRepository) GetByReference(ctx context.Context, reference s
 func (mr *MockTransferRepositoryMockRecorder) GetByReference(ctx, reference any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetByReference", reflect.TypeOf((*MockTransferRepository)(nil).GetByReference), ctx, reference)
+}
+
+// ListByAccountID mocks base method.
+func (m *MockTransferRepository) ListByAccountID(ctx context.Context, accountID string, params pagination.Params) ([]*entities.Transfer, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListByAccountID", ctx, accountID, params)
+	ret0, _ := ret[0].([]*entities.Transfer)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListByAccountID indicates an expected call of ListByAccountID.
+func (mr *MockTransferRepositoryMockRecorder) ListByAccountID(ctx, accountID, params any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListByAccountID", reflect.TypeOf((*MockTransferRepository)(nil).ListByAccountID), ctx, accountID, params)
 }
 
 // UpdateStatus mocks base method.

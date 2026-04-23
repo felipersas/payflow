@@ -7,6 +7,7 @@ import (
 	"github.com/felipersas/payflow/internal/transfer/application/commands"
 	"github.com/felipersas/payflow/internal/transfer/application/services"
 	"github.com/felipersas/payflow/pkg/httputil"
+	"github.com/felipersas/payflow/pkg/pagination"
 	"github.com/felipersas/payflow/pkg/validation"
 	"github.com/go-chi/chi/v5"
 )
@@ -21,6 +22,7 @@ func NewTransferHandler(service *services.TransferService) *TransferHandler {
 
 func (h *TransferHandler) Routes(r chi.Router) {
 	r.Post("/", h.CreateTransfer)
+	r.Get("/", h.ListTransfers)
 	r.Get("/{id}", h.GetTransfer)
 }
 
@@ -60,6 +62,28 @@ func (h *TransferHandler) GetTransfer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result, err := h.service.GetTransfer(r.Context(), transferID)
+	if err != nil {
+		httputil.WriteError(w, err)
+		return
+	}
+
+	httputil.WriteJSON(w, http.StatusOK, result)
+}
+
+func (h *TransferHandler) ListTransfers(w http.ResponseWriter, r *http.Request) {
+	accountID := r.URL.Query().Get("account_id")
+	if accountID == "" {
+		httputil.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "account_id is required"})
+		return
+	}
+
+	params, err := pagination.ParseParams(r.URL.Query().Get("cursor"), r.URL.Query().Get("limit"))
+	if err != nil {
+		httputil.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	result, err := h.service.ListTransfers(r.Context(), accountID, params)
 	if err != nil {
 		httputil.WriteError(w, err)
 		return

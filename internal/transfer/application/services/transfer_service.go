@@ -11,6 +11,7 @@ import (
 	"github.com/felipersas/payflow/internal/transfer/domain/repositories"
 	apperrors "github.com/felipersas/payflow/pkg/errors"
 	"github.com/felipersas/payflow/pkg/messaging"
+	"github.com/felipersas/payflow/pkg/pagination"
 )
 
 type TransferService struct {
@@ -287,4 +288,40 @@ func (s *TransferService) sendCreditCommand(ctx context.Context, transfer *entit
 		return fmt.Errorf("sending credit command: %w", err)
 	}
 	return nil
+}
+
+// ListTransfers returns a paginated list of transfers for the given account.
+func (s *TransferService) ListTransfers(ctx context.Context, accountID string, params pagination.Params) (*queries.TransferListResult, error) {
+	transfers, err := s.repo.ListByAccountID(ctx, accountID, params)
+	if err != nil {
+		return nil, fmt.Errorf("listing transfers for account %s: %w", accountID, err)
+	}
+
+	hasMore := len(transfers) > params.Limit
+	if hasMore {
+		transfers = transfers[:params.Limit]
+	}
+
+	results := make([]queries.TransferResult, len(transfers))
+	for i, t := range transfers {
+		results[i] = queries.TransferResult{
+			TransferID:    t.ID,
+			FromAccountID: t.FromAccountID,
+			ToAccountID:   t.ToAccountID,
+			Amount:        t.Amount,
+			Currency:      t.Currency,
+			Status:        t.Status,
+		}
+	}
+
+	result := &queries.TransferListResult{
+		Data:    results,
+		HasMore: hasMore,
+	}
+
+	if hasMore && len(transfers) > 0 {
+		result.Cursor = pagination.EncodeCursor(transfers[len(transfers)-1].ID)
+	}
+
+	return result, nil
 }

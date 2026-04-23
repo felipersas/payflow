@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/felipersas/payflow/internal/transfer/domain/entities"
+	"github.com/felipersas/payflow/pkg/pagination"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -104,11 +105,23 @@ func (r *TransferRepositoryImpl) UpdateStatus(ctx context.Context, id string, st
 	return nil
 }
 
-func (r *TransferRepositoryImpl) ListByAccountID(ctx context.Context, accountID string) ([]*entities.Transfer, error) {
-	rows, err := r.pool.Query(ctx,
-		`SELECT id, from_account_id, to_account_id, amount, currency, status, version, created_at, updated_at
-		 FROM transfers WHERE from_account_id = $1 OR to_account_id = $1 ORDER BY created_at DESC`, accountID,
-	)
+func (r *TransferRepositoryImpl) ListByAccountID(ctx context.Context, accountID string, params pagination.Params) ([]*entities.Transfer, error) {
+	query := `SELECT id, from_account_id, to_account_id, amount, currency, status, version, created_at, updated_at
+		 FROM transfers WHERE (from_account_id = $1 OR to_account_id = $1)`
+
+	args := []any{accountID}
+	argIdx := 2
+
+	if cursor := params.CursorID(); cursor != "" {
+		query += fmt.Sprintf(" AND id < $%d", argIdx)
+		args = append(args, cursor)
+		argIdx++
+	}
+
+	query += fmt.Sprintf(" ORDER BY id DESC LIMIT $%d", argIdx)
+	args = append(args, params.FetchLimit())
+
+	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("querying transfers by account ID: %w", err)
 	}

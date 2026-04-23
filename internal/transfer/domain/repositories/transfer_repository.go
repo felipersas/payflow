@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/felipersas/payflow/internal/transfer/domain/entities"
+	"github.com/felipersas/payflow/pkg/pagination"
 )
 
 //go:generate mockgen -source=transfer_repository.go -destination=mock_transfer_repository.go -package=repositories
@@ -23,4 +24,7 @@ type TransferRepository interface {
 
 	// UpdateStatus atualiza o status da transferência (e.g., "pending", "completed", "failed").
 	UpdateStatus(ctx context.Context, id string, status string) error
+
+	// ListByAccountID retorna transferências paginadas por cursor para uma conta.
+	ListByAccountID(ctx context.Context, accountID string, params pagination.Params) ([]*entities.Transfer, error)
 }

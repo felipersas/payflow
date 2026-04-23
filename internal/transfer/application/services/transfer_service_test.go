@@ -10,6 +10,7 @@ import (
 	"github.com/felipersas/payflow/internal/transfer/domain/entities"
 	"github.com/felipersas/payflow/internal/transfer/domain/repositories"
 	"github.com/felipersas/payflow/pkg/messaging"
+	"github.com/felipersas/payflow/pkg/pagination"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	gomock "go.uber.org/mock/gomock"
@@ -144,4 +145,49 @@ func TestGetTransfer_NotFound(t *testing.T) {
 
 	_, err := svc.GetTransfer(context.Background(), "nonexistent-id")
 	require.Error(t, err)
+}
+
+func TestListTransfers(t *testing.T) {
+	svc, mockRepo, _ := setupService(t)
+
+	t1, _ := entities.NewTransfer("acc-1", "acc-2", 100, "BRL")
+	t2, _ := entities.NewTransfer("acc-1", "acc-3", 200, "BRL")
+
+	params, _ := pagination.ParseParams("", "2")
+	mockRepo.EXPECT().ListByAccountID(gomock.Any(), "acc-1", params).Return([]*entities.Transfer{t1, t2}, nil)
+
+	result, err := svc.ListTransfers(context.Background(), "acc-1", params)
+	require.NoError(t, err)
+	assert.False(t, result.HasMore)
+	assert.Len(t, result.Data, 2)
+	assert.Empty(t, result.Cursor)
+}
+
+func TestListTransfers_HasMore(t *testing.T) {
+	svc, mockRepo, _ := setupService(t)
+
+	t1, _ := entities.NewTransfer("acc-1", "acc-2", 100, "BRL")
+	t2, _ := entities.NewTransfer("acc-1", "acc-3", 200, "BRL")
+	t3, _ := entities.NewTransfer("acc-1", "acc-4", 300, "BRL")
+
+	params, _ := pagination.ParseParams("", "2")
+	mockRepo.EXPECT().ListByAccountID(gomock.Any(), "acc-1", params).Return([]*entities.Transfer{t1, t2, t3}, nil)
+
+	result, err := svc.ListTransfers(context.Background(), "acc-1", params)
+	require.NoError(t, err)
+	assert.True(t, result.HasMore)
+	assert.Len(t, result.Data, 2)
+	assert.Equal(t, pagination.EncodeCursor(t2.ID), result.Cursor)
+}
+
+func TestListTransfers_Empty(t *testing.T) {
+	svc, mockRepo, _ := setupService(t)
+
+	params, _ := pagination.ParseParams("", "2")
+	mockRepo.EXPECT().ListByAccountID(gomock.Any(), "acc-1", params).Return([]*entities.Transfer{}, nil)
+
+	result, err := svc.ListTransfers(context.Background(), "acc-1", params)
+	require.NoError(t, err)
+	assert.False(t, result.HasMore)
+	assert.Empty(t, result.Data)
 }
