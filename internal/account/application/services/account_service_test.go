@@ -67,6 +67,10 @@ func (m *mockRepo) SaveTransaction(_ context.Context, tx *repositories.Transacti
 	return nil
 }
 
+func (m *mockRepo) RunInTransaction(ctx context.Context, fn func(ctx context.Context) error) error {
+	return fn(ctx)
+}
+
 func setupService() (*AccountService, *mockRepo) {
 	repo := newMockRepo()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelWarn}))

@@ -8,8 +8,19 @@ import (
 	"github.com/felipersas/payflow/internal/account/domain/entities"
 	"github.com/felipersas/payflow/internal/account/domain/repositories"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+type txKeyType struct{}
+
+var txKey = txKeyType{}
+
+// querier abstracts the common DB operations between pgxpool.Pool and pgx.Tx.
+type querier interface {
+	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
 
 // AccountRepositoryImpl é a implementação concreta do contrato do domínio.
 // Usa pgx para acesso ao PostgreSQL com connection pool.
@@ -21,8 +32,30 @@ func NewAccountRepository(pool *pgxpool.Pool) *AccountRepositoryImpl {
 	return &AccountRepositoryImpl{pool: pool}
 }
 
+// getQuerier returns pgx.Tx from context (if inside a transaction) or falls back to the pool.
+func (r *AccountRepositoryImpl) getQuerier(ctx context.Context) querier {
+	if tx, ok := ctx.Value(txKey).(pgx.Tx); ok {
+		return tx
+	}
+	return r.pool
+}
+
+func (r *AccountRepositoryImpl) RunInTransaction(ctx context.Context, fn func(ctx context.Context) error) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("beginning transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	txCtx := context.WithValue(ctx, txKey, tx)
+	if err := fn(txCtx); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
 func (r *AccountRepositoryImpl) Create(ctx context.Context, account *entities.Account) error {
-	_, err := r.pool.Exec(ctx,
+	_, err := r.getQuerier(ctx).Exec(ctx,
 		`INSERT INTO accounts (id, user_id, balance, currency, is_active, version, created_at, updated_at)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
 		account.ID, account.UserID, account.Balance, account.Currency,
@@ -36,7 +69,7 @@ func (r *AccountRepositoryImpl) Create(ctx context.Context, account *entities.Ac
 
 func (r *AccountRepositoryImpl) GetByID(ctx context.Context, id string) (*entities.Account, error) {
 	var a entities.Account
-	err := r.pool.QueryRow(ctx,
+	err := r.getQuerier(ctx).QueryRow(ctx,
 		`SELECT id, user_id, balance, currency, is_active, version, created_at, updated_at
 		 FROM accounts WHERE id = $1`, id,
 	).Scan(&a.ID, &a.UserID, &a.Balance, &a.Currency, &a.IsActive, &a.Version, &a.CreatedAt, &a.UpdatedAt)
@@ -51,7 +84,7 @@ func (r *AccountRepositoryImpl) GetByID(ctx context.Context, id string) (*entiti
 
 func (r *AccountRepositoryImpl) GetByUserID(ctx context.Context, userID string) (*entities.Account, error) {
 	var a entities.Account
-	err := r.pool.QueryRow(ctx,
+	err := r.getQuerier(ctx).QueryRow(ctx,
 		`SELECT id, user_id, balance, currency, is_active, version, created_at, updated_at
 		 FROM accounts WHERE user_id = $1`, userID,
 	).Scan(&a.ID, &a.UserID, &a.Balance, &a.Currency, &a.IsActive, &a.Version, &a.CreatedAt, &a.UpdatedAt)
@@ -67,7 +100,7 @@ func (r *AccountRepositoryImpl) GetByUserID(ctx context.Context, userID string) 
 // Update usa optimistic locking: só atualiza se a versão no DB bate com a da entidade.
 // Se outro processo modificou a conta, a versão diverge e retorna erro.
 func (r *AccountRepositoryImpl) Update(ctx context.Context, account *entities.Account) error {
-	tag, err := r.pool.Exec(ctx,
+	tag, err := r.getQuerier(ctx).Exec(ctx,
 		`UPDATE accounts
 		 SET balance = $1, is_active = $2, version = $3, updated_at = $4
 		 WHERE id = $5 AND version = $6`,
@@ -86,7 +119,7 @@ func (r *AccountRepositoryImpl) Update(ctx context.Context, account *entities.Ac
 func (r *AccountRepositoryImpl) GetByReference(ctx context.Context, reference string) (*repositories.Transaction, error) {
 	var tx repositories.Transaction
 	var createdAt time.Time
-	err := r.pool.QueryRow(ctx,
+	err := r.getQuerier(ctx).QueryRow(ctx,
 		`SELECT id, account_id, reference, amount, type, balance_after, created_at
 		 FROM transactions WHERE reference = $1`, reference,
 	).Scan(&tx.ID, &tx.AccountID, &tx.Reference, &tx.Amount, &tx.Type, &tx.BalanceAfter, &createdAt)
@@ -105,7 +138,7 @@ func (r *AccountRepositoryImpl) SaveTransaction(ctx context.Context, tx *reposit
 	if err != nil {
 		createdAt = time.Now().UTC()
 	}
-	_, err = r.pool.Exec(ctx,
+	_, err = r.getQuerier(ctx).Exec(ctx,
 		`INSERT INTO transactions (id, account_id, reference, amount, type, balance_after, created_at)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
 		tx.ID, tx.AccountID, tx.Reference, tx.Amount, tx.Type, tx.BalanceAfter, createdAt,

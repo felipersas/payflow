@@ -58,40 +58,53 @@ func (s *AccountService) CreateAccount(ctx context.Context, cmd commands.CreateA
 }
 
 // DebitAccount debita valor com idempotência baseada em reference.
-// Se a referência já foi processada, retorna o resultado anterior.
+// A verificação de idempotência + update + save transaction rodam atomicamente
+// dentro de uma transação DB para prevenir race conditions.
 func (s *AccountService) DebitAccount(ctx context.Context, cmd commands.DebitAccountCommand) (*entities.Account, error) {
-	// Idempotência: verifica se já processamos esta referência
-	if isDup, err := s.CheckIdempotency(ctx, cmd.Reference, "debit"); err != nil {
+	var account *entities.Account
+	var event *events.AccountDebited
+
+	err := s.repo.RunInTransaction(ctx, func(txCtx context.Context) error {
+		existing, err := s.repo.GetByReference(txCtx, cmd.Reference)
+		if err != nil {
+			return err
+		}
+		if existing != nil {
+			s.logger.Info("duplicate debit ignored (idempotency)", "reference", cmd.Reference)
+			account, err = s.repo.GetByID(txCtx, cmd.AccountID)
+			return err
+		}
+
+		account, err = s.repo.GetByID(txCtx, cmd.AccountID)
+		if err != nil {
+			return fmt.Errorf("finding account %s: %w", cmd.AccountID, err)
+		}
+
+		event, err = account.Debit(cmd.Amount, cmd.Reference)
+		if err != nil {
+			return fmt.Errorf("debiting account: %w", err)
+		}
+
+		if err := s.repo.Update(txCtx, account); err != nil {
+			return fmt.Errorf("updating account: %w", err)
+		}
+
+		tx := &repositories.Transaction{
+			ID:           uuid.Must(uuid.NewV7()).String(),
+			AccountID:    account.ID,
+			Reference:    cmd.Reference,
+			Amount:       cmd.Amount,
+			Type:         "debit",
+			BalanceAfter: account.Balance,
+		}
+		if err := s.repo.SaveTransaction(txCtx, tx); err != nil {
+			return fmt.Errorf("saving transaction: %w", err)
+		}
+
+		return nil
+	})
+	if err != nil {
 		return nil, err
-	} else if isDup {
-		return s.repo.GetByID(ctx, cmd.AccountID)
-	}
-
-	account, err := s.repo.GetByID(ctx, cmd.AccountID)
-	if err != nil {
-		return nil, fmt.Errorf("finding account %s: %w", cmd.AccountID, err)
-	}
-
-	event, err := account.Debit(cmd.Amount, cmd.Reference)
-	if err != nil {
-		return nil, fmt.Errorf("debiting account: %w", err)
-	}
-
-	if err := s.repo.Update(ctx, account); err != nil {
-		return nil, fmt.Errorf("updating account: %w", err)
-	}
-
-	// Registra transação para idempotência
-	tx := &repositories.Transaction{
-		ID:           uuid.Must(uuid.NewV7()).String(),
-		AccountID:    account.ID,
-		Reference:    cmd.Reference,
-		Amount:       cmd.Amount,
-		Type:         "debit",
-		BalanceAfter: account.Balance,
-	}
-	if err := s.repo.SaveTransaction(ctx, tx); err != nil {
-		return nil, fmt.Errorf("saving transaction: %w", err)
 	}
 
 	s.publishEvent(ctx, events.AccountDebitedEvent, event)
@@ -101,37 +114,52 @@ func (s *AccountService) DebitAccount(ctx context.Context, cmd commands.DebitAcc
 }
 
 // CreditAccount credita valor com idempotência baseada em reference.
+// A verificação de idempotência + update + save transaction rodam atomicamente.
 func (s *AccountService) CreditAccount(ctx context.Context, cmd commands.CreditAccountCommand) (*entities.Account, error) {
-	if isDup, err := s.CheckIdempotency(ctx, cmd.Reference, "credit"); err != nil {
+	var account *entities.Account
+	var event *events.AccountCredited
+
+	err := s.repo.RunInTransaction(ctx, func(txCtx context.Context) error {
+		existing, err := s.repo.GetByReference(txCtx, cmd.Reference)
+		if err != nil {
+			return err
+		}
+		if existing != nil {
+			s.logger.Info("duplicate credit ignored (idempotency)", "reference", cmd.Reference)
+			account, err = s.repo.GetByID(txCtx, cmd.AccountID)
+			return err
+		}
+
+		account, err = s.repo.GetByID(txCtx, cmd.AccountID)
+		if err != nil {
+			return fmt.Errorf("finding account %s: %w", cmd.AccountID, err)
+		}
+
+		event, err = account.Credit(cmd.Amount, cmd.Reference)
+		if err != nil {
+			return fmt.Errorf("crediting account: %w", err)
+		}
+
+		if err := s.repo.Update(txCtx, account); err != nil {
+			return fmt.Errorf("updating account: %w", err)
+		}
+
+		tx := &repositories.Transaction{
+			ID:           uuid.Must(uuid.NewV7()).String(),
+			AccountID:    account.ID,
+			Reference:    cmd.Reference,
+			Amount:       cmd.Amount,
+			Type:         "credit",
+			BalanceAfter: account.Balance,
+		}
+		if err := s.repo.SaveTransaction(txCtx, tx); err != nil {
+			return fmt.Errorf("saving transaction: %w", err)
+		}
+
+		return nil
+	})
+	if err != nil {
 		return nil, err
-	} else if isDup {
-		return s.repo.GetByID(ctx, cmd.AccountID)
-	}
-
-	account, err := s.repo.GetByID(ctx, cmd.AccountID)
-	if err != nil {
-		return nil, fmt.Errorf("finding account %s: %w", cmd.AccountID, err)
-	}
-
-	event, err := account.Credit(cmd.Amount, cmd.Reference)
-	if err != nil {
-		return nil, fmt.Errorf("crediting account: %w", err)
-	}
-
-	if err := s.repo.Update(ctx, account); err != nil {
-		return nil, fmt.Errorf("updating account: %w", err)
-	}
-
-	tx := &repositories.Transaction{
-		ID:           uuid.Must(uuid.NewV7()).String(),
-		AccountID:    account.ID,
-		Reference:    cmd.Reference,
-		Amount:       cmd.Amount,
-		Type:         "credit",
-		BalanceAfter: account.Balance,
-	}
-	if err := s.repo.SaveTransaction(ctx, tx); err != nil {
-		return nil, fmt.Errorf("saving transaction: %w", err)
 	}
 
 	s.publishEvent(ctx, events.AccountCreditedEvent, event)
@@ -176,16 +204,4 @@ func (s *AccountService) publishEvent(ctx context.Context, routingKey string, ev
 	if err := s.publisher.Publish(ctx, routingKey, event); err != nil {
 		s.logger.Error("failed to publish event", "routing_key", routingKey, "error", err)
 	}
-}
-
-func (s *AccountService) CheckIdempotency(ctx context.Context, reference string, action string) (bool, error) {
-	existing, err := s.repo.GetByReference(ctx, reference)
-	if err != nil {
-		return false, err
-	}
-	if existing != nil {
-		s.logger.Info("duplicate "+action+" ignored (idempotency)", "reference", reference)
-		return true, nil
-	}
-	return false, nil
 }

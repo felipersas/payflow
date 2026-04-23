@@ -30,6 +30,11 @@ type AccountRepository interface {
 
 	// SaveTransaction registra uma transação para idempotência.
 	SaveTransaction(ctx context.Context, tx *Transaction) error
+
+	// RunInTransaction executa fn dentro de uma transação DB atômica.
+	// O ctx passado para fn carrega a transação; todas as operações
+	// do repositório chamadas com esse ctx usam a mesma transação.
+	RunInTransaction(ctx context.Context, fn func(ctx context.Context) error) error
 }
 
 // Transaction representa o registro de idempotência.

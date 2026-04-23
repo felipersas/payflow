@@ -152,6 +152,11 @@ func TestCreditAccount_Success(t *testing.T) {
 	mockRepo := repositories.NewMockAccountRepository(ctrl)
 	account, _ := entities.NewAccount("user-1", "BRL")
 
+	mockRepo.EXPECT().RunInTransaction(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(ctx context.Context, fn func(context.Context) error) error {
+			return fn(ctx)
+		},
+	)
 	mockRepo.EXPECT().GetByReference(gomock.Any(), "ref-1").Return(nil, nil)
 	mockRepo.EXPECT().GetByID(gomock.Any(), account.ID).Return(account, nil).AnyTimes()
 	mockRepo.EXPECT().Update(gomock.Any(), gomock.Any()).Return(nil)
@@ -193,6 +198,11 @@ func TestDebitAccount_Success(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	svc := services.NewAccountService(mockRepo, nil, logger)
 
+	mockRepo.EXPECT().RunInTransaction(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(ctx context.Context, fn func(context.Context) error) error {
+			return fn(ctx)
+		},
+	)
 	mockRepo.EXPECT().GetByReference(gomock.Any(), "init-credit").Return(nil, nil)
 	mockRepo.EXPECT().GetByID(gomock.Any(), account.ID).Return(account, nil).AnyTimes()
 	mockRepo.EXPECT().Update(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
@@ -209,6 +219,11 @@ func TestDebitAccount_Success(t *testing.T) {
 	ctrl = gomock.NewController(t)
 	mockRepo = repositories.NewMockAccountRepository(ctrl)
 
+	mockRepo.EXPECT().RunInTransaction(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(ctx context.Context, fn func(context.Context) error) error {
+			return fn(ctx)
+		},
+	)
 	mockRepo.EXPECT().GetByReference(gomock.Any(), "debit-ref").Return(nil, nil)
 	mockRepo.EXPECT().GetByID(gomock.Any(), account.ID).Return(account, nil).AnyTimes()
 	mockRepo.EXPECT().Update(gomock.Any(), gomock.Any()).Return(nil)
@@ -246,6 +261,11 @@ func TestDebitAccount_InsufficientBalance(t *testing.T) {
 	mockRepo := repositories.NewMockAccountRepository(ctrl)
 	account, _ := entities.NewAccount("user-1", "BRL")
 
+	mockRepo.EXPECT().RunInTransaction(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(ctx context.Context, fn func(context.Context) error) error {
+			return fn(ctx)
+		},
+	)
 	mockRepo.EXPECT().GetByReference(gomock.Any(), "debit-ref").Return(nil, nil)
 	mockRepo.EXPECT().GetByID(gomock.Any(), account.ID).Return(account, nil).AnyTimes()
 	mockRepo.EXPECT().Update(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
