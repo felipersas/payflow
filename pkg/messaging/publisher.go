@@ -7,6 +7,8 @@ import (
 	"log/slog"
 
 	amqp "github.com/rabbitmq/amqp091-go"
+
+	"github.com/felipersas/payflow/pkg/telemetry"
 )
 
 const exchangeName = "payflow.events"
@@ -61,9 +63,11 @@ func (p *Publisher) Publish(ctx context.Context, routingKey string, event any) e
 		},
 	)
 	if err != nil {
+		telemetry.RabbitMQPublishTotal.WithLabelValues(routingKey, "error").Inc()
 		return fmt.Errorf("publishing event: %w", err)
 	}
 
+	telemetry.RabbitMQPublishTotal.WithLabelValues(routingKey, "success").Inc()
 	p.logger.Info("event published", "routing_key", routingKey, "event_type", routingKey)
 	return nil
 }

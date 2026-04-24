@@ -20,6 +20,10 @@
         {
           "expr": "sum(rate(http_requests_total{job=\"transfer-service\"}[5m]))",
           "legendFormat": "transfer-service"
+        },
+        {
+          "expr": "sum(rate(http_requests_total{job=\"user-service\"}[5m]))",
+          "legendFormat": "user-service"
         }
       ],
       "fieldConfig": {

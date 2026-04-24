@@ -6,6 +6,8 @@ import (
 	"log/slog"
 
 	amqp "github.com/rabbitmq/amqp091-go"
+
+	"github.com/felipersas/payflow/pkg/telemetry"
 )
 
 // Handler é a função que processa cada mensagem recebida.
@@ -87,9 +89,11 @@ func (c *Consumer) Consume(ctx context.Context, queueName, routingKey string, ha
 				}
 				if err := handler(ctx, d.Body); err != nil {
 					c.logger.Error("handler error, nacking", "queue", queueName, "error", err)
+					telemetry.RabbitMQConsumeTotal.WithLabelValues(queueName, "error").Inc()
 					d.Nack(false, false) // requeue=false → vai para DLQ
 					continue
 				}
+				telemetry.RabbitMQConsumeTotal.WithLabelValues(queueName, "success").Inc()
 				d.Ack(false)
 			}
 		}
