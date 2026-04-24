@@ -6,10 +6,14 @@ import (
 	"time"
 
 	"github.com/felipersas/payflow/internal/transfer/domain/entities"
+	"github.com/felipersas/payflow/internal/transfer/domain/repositories"
 	"github.com/felipersas/payflow/pkg/pagination"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// verify interface compliance at compile time
+var _ repositories.TransferRepository = (*TransferRepositoryImpl)(nil)
 
 type TransferRepositoryImpl struct {
 	pool *pgxpool.Pool

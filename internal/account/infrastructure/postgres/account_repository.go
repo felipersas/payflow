@@ -24,6 +24,9 @@ type querier interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
+// verify interface compliance at compile time
+var _ repositories.AccountRepository = (*AccountRepositoryImpl)(nil)
+
 // AccountRepositoryImpl é a implementação concreta do contrato do domínio.
 // Usa pgx para acesso ao PostgreSQL com connection pool.
 type AccountRepositoryImpl struct {

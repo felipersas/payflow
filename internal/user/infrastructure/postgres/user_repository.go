@@ -6,12 +6,16 @@ import (
 	"fmt"
 
 	"github.com/felipersas/payflow/internal/user/domain/entities"
+	"github.com/felipersas/payflow/internal/user/domain/repositories"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 //go:embed migrations/*.sql
 var Migrations embed.FS
+
+// verify interface compliance at compile time
+var _ repositories.UserRepository = (*UserRepositoryImpl)(nil)
 
 // UserRepositoryImpl implementa repositories.UserRepository com pgx.
 type UserRepositoryImpl struct {
